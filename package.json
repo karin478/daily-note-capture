@@ -1,0 +1,25 @@
+{
+  "name": "daily-note-capture",
+  "private": true,
+  "scripts": {
+    "build": "esbuild popup/src/editor.js --bundle --format=iife --minify --outfile=popup/editor.bundle.js",
+    "test:js": "node --test popup/src/*.test.js",
+    "test:lua": "luajit tests/placement_test.lua && luajit tests/hotkey_test.lua"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
+    "@lezer/highlight": "1.2.5",
+    "@lezer/markdown": "1.7.2",
+    "turndown": "7.2.4",
+    "turndown-plugin-gfm": "1.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "type": "module"
+}

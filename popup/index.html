@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#fbfbfa; --fg:#1f1f1f; --muted:#8a8a85; --line:#e4e4e0; --code:#f0f0ee; --accent:#7c5cdb;
+          --mark:#fff3a3; --mono:ui-monospace, "SF Mono", Menlo, monospace; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#232324; --fg:#e8e8e6; --muted:#8d8d88; --line:#3a3a3a; --code:#2e2e30; --accent:#a68af9;
+            --mark:#6b5d1e; }
+  }
+  html, body { margin:0; height:100%; background:transparent; overflow:hidden; }
+  .box { box-sizing:border-box; height:100%; display:flex; flex-direction:column;
+         background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:14px; overflow:hidden;
+         font:15px/1.6 -apple-system, "PingFang SC", sans-serif; }
+  .head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 12px 4px 14px; color:var(--muted); font-size:12px; }
+  .head, .foot { -webkit-user-select:none; user-select:none; cursor:default; }
+  .nav, .tools { display:flex; align-items:center; gap:4px; min-width:0; }
+  .head button { font:inherit; color:var(--muted); background:none; border:0; border-radius:6px; padding:2px 6px; cursor:pointer; }
+  .head button:hover { background:var(--code); color:var(--fg); }
+  #today { border:1px solid var(--line); }
+  #status { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  [data-edge] { position:fixed; z-index:10; }
+  [data-edge="r"] { top:14px; bottom:14px; right:0; width:6px; cursor:ew-resize; }
+  [data-edge="l"] { top:14px; bottom:14px; left:0; width:6px; cursor:ew-resize; }
+  [data-edge="b"] { left:14px; right:14px; bottom:0; height:6px; cursor:ns-resize; }
+  [data-edge="rb"] { right:0; bottom:0; width:14px; height:14px; cursor:nwse-resize; }
+  [data-edge="lb"] { left:0; bottom:0; width:14px; height:14px; cursor:nesw-resize; }
+  #editor { flex:1; min-height:0; }
+  .cm-editor { height:100%; background:transparent; color:var(--fg); }
+  .cm-editor.cm-focused { outline:none; }
+  /* #editor outranks CodeMirror's injected base theme (monospace font, its own padding) */
+  #editor .cm-scroller { font-family:inherit; line-height:1.5; padding:4px 0 24px; }
+  #editor .cm-content { padding:0 22px; }
+  .cm-line { padding:0; }
+  .cm-placeholder { color:var(--muted); }
+  .cm-cursor, .cm-dropCursor { border-left:2px solid var(--accent) !important; margin-left:-1px; }
+  .cm-selectionBackground, .cm-focused .cm-selectionBackground { background:rgba(124,92,219,.25) !important; }
+  .cm-h1, .cm-h2, .cm-h3 { padding-top:6px !important; }
+  .cm-quote { border-left:3px solid var(--line); padding-left:12px !important; color:var(--muted); }
+  .cm-codeblock { font-family:var(--mono); font-size:13px; background:var(--code); padding:0 10px !important; }
+  .cm-bullet { color:var(--muted); display:inline-block; width:.8em; }
+  .cm-task { appearance:none; -webkit-appearance:none; box-sizing:border-box; width:15px; height:15px; margin:0 .45em 0 0;
+             vertical-align:-2px; border:1.5px solid var(--muted); border-radius:4px; cursor:pointer; position:relative; }
+  .cm-task:checked { background:var(--accent); border-color:var(--accent); }
+  .cm-task:checked::after { content:""; position:absolute; left:4px; top:1px; width:4px; height:8px;
+                            border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg); }
+  .cm-wikilink { color:var(--accent); }
+  .cm-highlight { background:var(--mark); border-radius:3px; }
+  .cm-wikilink[data-target], .cm-wikilink[data-url] { cursor:pointer; }
+  .cm-time { color:var(--muted); font-variant-numeric:tabular-nums; font-size:.92em; }
+  .cm-embed-image { display:block; max-width:100%; max-height:280px; margin:4px 0; border-radius:6px; cursor:pointer; }
+  .cm-embed-file { color:var(--accent); background:var(--code); border-radius:4px; padding:0 6px; cursor:pointer; }
+  .cm-tooltip.cm-tooltip-autocomplete { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.18); overflow:hidden; }
+  .cm-tooltip-autocomplete > ul { font-family:inherit !important; max-height:14em !important; }
+  .cm-tooltip-autocomplete > ul > li { padding:3px 10px !important; }
+  .cm-tooltip-autocomplete > ul > li[aria-selected] { background:var(--accent) !important; color:#fff !important; }
+  .cm-completionDetail { color:var(--muted); margin-left:.8em; font-style:normal; font-size:.85em; }
+  .cm-completionMatchedText { text-decoration:none; font-weight:600; }
+  #zoom { position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:20; padding:4px 12px; border-radius:8px;
+          background:var(--fg); color:var(--bg); font:600 13px -apple-system, sans-serif; opacity:0; pointer-events:none;
+          transition:opacity .15s; }
+  #zoom.show { opacity:.9; }
+  .foot { padding:6px 16px 10px; color:var(--muted); font-size:11px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="head">
+    <div class="nav">
+      <button id="prev" title="前一天 ⌘[">‹</button><span id="day">Note</span><button id="next" title="后一天 ⌘]">›</button>
+      <button id="today" hidden>回到今天</button>
+    </div>
+    <div class="tools"><span id="status"></span></div>
+  </div>
+  <div id="editor"></div>
+  <div class="foot">自动保存 · ⌘T 时间 · ⌘[ 前一天 · ⌘] 后一天 · ⌘± 缩放 · Esc 关闭</div>
+</div>
+<div id="zoom"></div>
+<div data-edge="l"></div><div data-edge="r"></div><div data-edge="b"></div><div data-edge="lb"></div><div data-edge="rb"></div>
+<script src="editor.bundle.js"></script>
+</body>
+</html>
