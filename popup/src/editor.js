@@ -13,6 +13,7 @@ import { afterSave } from './autosave.js';
 import { tagCompletions, wikilinkCompletions } from './completion.js';
 import { embedFor, htmlToMarkdown, isImage, linkOverSelection } from './paste.js';
 import { stepZoom } from './zoom.js';
+import { placeFor } from './place.js';
 import { dayStep } from './keys.js';
 
 const SAVE_DELAY = 400;
@@ -308,18 +309,30 @@ $('prev').addEventListener('click', stepDay(-1));
 $('next').addEventListener('click', stepDay(1));
 $('today').addEventListener('click', () => switchTo(current(shown() ?? isoDay())));
 
+// Each note's cursor and scroll, so reopening the panel or coming back to a note picks up there.
+const places = new Map();
+function rememberPlace() {
+  if (noteDate === null) return;
+  const { anchor, head } = view.state.selection.main;
+  places.set(noteDate, { anchor, head, scrollTop: view.scrollDOM.scrollTop });
+}
+
 // ---- API called from Hammerspoon ----
 window.loadNote = ({ date, body }) => {
   const editing = view.state.doc.toString() !== base;
   if (editing && date === noteDate) return; // keep unsaved typing; it saves against `base`
+  rememberPlace();
+  const place = placeFor(places.get(date), body.length);
   noteDate = date;
   wantedDay = null;
   base = body;
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: body },
-    selection: { anchor: body.length }, // open ready to keep writing at the end
-    scrollIntoView: true,
+    // an unchanged note is left as it is, so nothing on screen moves
+    changes: body === view.state.doc.toString() ? [] : { from: 0, to: view.state.doc.length, insert: body },
+    selection: { anchor: place.anchor, head: place.head },
+    scrollIntoView: place.scrollTop === null, // the first time: at the end, ready to keep writing
   });
+  if (place.scrollTop !== null) view.scrollDOM.scrollTop = place.scrollTop;
   clearTimeout(timer);
   renderTitle();
   setStatus('');
