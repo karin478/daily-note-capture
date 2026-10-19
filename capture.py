@@ -3,7 +3,8 @@
 Usage: python capture.py "text"   (or pipe text on stdin)
        python capture.py --ensure   (create today's note if missing, print its vault path)
        python capture.py --get [YYYY-MM-DD]             -> {"date", "body"}: the whole note (creates nothing)
-       python capture.py --set YYYY-MM-DD BASE BODY     write the whole note; exit 3 if it no longer equals BASE
+       python capture.py --get YYYY [--create]          the same for a year note; --create makes it if missing
+       python capture.py --set DATE BASE BODY           write the whole note; exit 3 if it no longer equals BASE
        python capture.py --attach NAME [EXT] < base64   save a pasted/dropped file where Obsidian puts attachments
        python capture.py --index OUT.json               write note names, file paths and tags for the panel
        python capture.py --doctor                       show which vault, folder, template and format are used
@@ -53,10 +54,18 @@ def _emit(day, body):
     print(json.dumps({"date": day, "body": body}, ensure_ascii=False))
 
 
-def _whole_note(settings, day):
-    """The panel edits a day's whole note; a missing one shows as the template until saved."""
-    path = settings.note_path(date.fromisoformat(day))
-    return path.read_text(encoding="utf-8") if path.exists() else settings.template_text(date.fromisoformat(day))
+def _note(settings, key):
+    """A note the panel edits, by key: YYYY-MM-DD is a day's note, YYYY a year's."""
+    if re.fullmatch(r"\d{4}", key):
+        return settings.year_path(int(key)), settings.year_template_text(int(key))
+    day = date.fromisoformat(key)
+    return settings.note_path(day), settings.template_text(day)
+
+
+def _whole_note(settings, key):
+    """The panel edits a whole note; a missing one shows as the template until saved."""
+    path, template = _note(settings, key)
+    return path.read_text(encoding="utf-8") if path.exists() else template
 
 
 def _doctor(settings):
@@ -66,6 +75,7 @@ def _doctor(settings):
     print(f"模板:     {template or '（无）'}{'' if not template or template.is_file() else '  ⚠️ 文件不存在，新日报会是空白'}")
     print(f"日期格式:  {settings.format}")
     print(f"今天的日报: {settings.note_path(date.today())}")
+    print(f"今年的年报: {settings.year_path(date.today().year)}")
 
 
 def main():
@@ -96,7 +106,9 @@ def run(settings, args):
         return
     if args[:1] == ["--get"]:
         day = args[1] if len(args) > 1 else date.today().isoformat()
-        _emit(day, _whole_note(settings, day))  # looking never creates a note; the first save does
+        if "--create" in args[2:]:
+            ensure_note(*_note(settings, day))
+        _emit(day, _whole_note(settings, day))  # without --create, looking never creates a note; the first save does
         return
     if args[:1] == ["--set"]:
         day, base, body = args[1:4]
@@ -104,7 +116,7 @@ def run(settings, args):
         if current != base:
             _emit(day, current)
             sys.exit(3)
-        path = settings.note_path(date.fromisoformat(day))
+        path = _note(settings, day)[0]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
         _emit(day, body)

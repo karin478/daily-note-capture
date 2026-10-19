@@ -19,6 +19,9 @@
   .head button { font:inherit; color:var(--muted); background:none; border:0; border-radius:6px; padding:2px 6px; cursor:pointer; }
   .head button:hover { background:var(--code); color:var(--fg); }
   #today { border:1px solid var(--line); }
+  .mode { display:flex; border:1px solid var(--line); border-radius:7px; padding:1px; margin-right:6px; }
+  .mode button { padding:1px 7px; border-radius:5px; }
+  .mode button.on { background:var(--code); color:var(--fg); }
   #status { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   [data-edge] { position:fixed; z-index:10; }
   [data-edge="r"] { top:14px; bottom:14px; right:0; width:6px; cursor:ew-resize; }
@@ -69,13 +72,14 @@
 <div class="box">
   <div class="head">
     <div class="nav">
+      <div class="mode"><button data-mode="day" class="on" title="日报">日</button><button data-mode="year" title="年报">年</button></div>
       <button id="prev" title="前一天 ⌘[">‹</button><span id="day">Note</span><button id="next" title="后一天 ⌘]">›</button>
       <button id="today" hidden>回到今天</button>
     </div>
     <div class="tools"><span id="status"></span></div>
   </div>
   <div id="editor"></div>
-  <div class="foot">自动保存 · ⌘T 时间 · ⌘[ 前一天 · ⌘] 后一天 · ⌘± 缩放 · Esc 关闭</div>
+  <div class="foot">自动保存 · ⌘T 时间 · ⌘[ ⌘] 前后切换 · ⌘± 缩放 · Esc 关闭</div>
 </div>
 <div id="zoom"></div>
 <div data-edge="l"></div><div data-edge="r"></div><div data-edge="b"></div><div data-edge="lb"></div><div data-edge="rb"></div>

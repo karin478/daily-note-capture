@@ -1,4 +1,4 @@
-// The panel's editor: a day's whole daily note as plain markdown, rendered Obsidian-style, autosaved.
+// The panel's editor: a whole daily (or yearly) note as plain markdown, rendered Obsidian-style, autosaved.
 import { EditorState } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, WidgetType, drawSelection, keymap, placeholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -7,7 +7,8 @@ import { autocompletion } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
 import { deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { markdownExtension, newlineInList, previewRanges, toggleTask } from './preview.js';
-import { clock, isoDay, shiftDay, weekday } from './timeline.js';
+import { clock, isoDay } from './timeline.js';
+import { current, isYear, shift, title, yearOf } from './period.js';
 import { afterSave } from './autosave.js';
 import { tagCompletions, wikilinkCompletions } from './completion.js';
 import { embedFor, htmlToMarkdown, isImage, linkOverSelection } from './paste.js';
@@ -121,12 +122,12 @@ const markdownStyle = HighlightStyle.define([
 ]);
 
 // Autosave: each change is saved after a short pause; one save in flight at a time.
-let noteDate = null;
+let noteDate = null; // the note's key: YYYY-MM-DD, or YYYY for a year note
 let base = '';
 let timer = null;
 let inflight = false;
 let sent = null; // the body of the save in flight
-let pendingDay = null; // a day to switch to once the current one is saved
+let pending = null; // a note to switch to once the current one is saved: { date, create }
 
 function requestSave(delay = SAVE_DELAY) {
   clearTimeout(timer);
@@ -143,20 +144,21 @@ function flush() {
   post({ action: 'save', date: noteDate, base, body });
 }
 
-function goToDay(day) {
-  pendingDay = day;
+function goToDay(day, create = false) {
+  pending = { date: day, create };
   flush();
   if (!inflight && view.state.doc.toString() === base) {
-    pendingDay = null;
-    post({ action: 'load', date: day });
+    pending = null;
+    post({ action: 'load', date: day, create });
   }
 }
 // Quick repeated steps add up: the header follows at once and only the day you stop on loads.
 let wantedDay = null, stepTimer = null;
+const shown = () => wantedDay ?? noteDate;
 const stepDay = (delta) => () => {
-  const from = wantedDay ?? noteDate;
+  const from = shown();
   if (!from) return true;
-  const day = (wantedDay = shiftDay(from, delta));
+  const day = (wantedDay = shift(from, delta));
   renderTitle(day);
   clearTimeout(stepTimer);
   stepTimer = setTimeout(() => goToDay(day), 150);
@@ -273,14 +275,38 @@ window.attached = ({ id, name, path }) => {
   view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, scrollIntoView: true });
 };
 
-// ---- Day header ----
+// ---- Header: which note, and 日 / 年 ----
 function renderTitle(day = noteDate) {
-  $('day').textContent = `${day} ${weekday(day)}`;
-  $('today').hidden = day === isoDay();
+  const year = isYear(day);
+  $('day').textContent = title(day);
+  $('today').textContent = year ? '回到今年' : '回到今天';
+  $('today').hidden = day === current(day);
+  $('prev').title = year ? '前一年 ⌘[' : '前一天 ⌘[';
+  $('next').title = year ? '后一年 ⌘]' : '后一天 ⌘]';
+  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', (b.dataset.mode === 'year') === year);
+}
+
+// The header follows at once; a year note is created as soon as you open it.
+function switchTo(key) {
+  clearTimeout(stepTimer);
+  wantedDay = key;
+  renderTitle(key);
+  goToDay(key, isYear(key));
+}
+
+let lastDay = null; // 日 brings you back to the day you left for the year
+for (const b of document.querySelectorAll('[data-mode]')) {
+  b.addEventListener('click', () => {
+    const from = shown() ?? isoDay();
+    if ((b.dataset.mode === 'year') === isYear(from)) return;
+    if (isYear(from)) return switchTo(lastDay ?? isoDay());
+    lastDay = from;
+    switchTo(yearOf(from));
+  });
 }
 $('prev').addEventListener('click', stepDay(-1));
 $('next').addEventListener('click', stepDay(1));
-$('today').addEventListener('click', () => goToDay(isoDay()));
+$('today').addEventListener('click', () => switchTo(current(shown() ?? isoDay())));
 
 // ---- API called from Hammerspoon ----
 window.loadNote = ({ date, body }) => {
@@ -310,9 +336,9 @@ window.saved = ({ date, body }) => {
     const next = afterSave({ sent, stored: body, now: view.state.doc.toString() });
     base = next.base;
     setStatus(next.mismatch ? '文件里存下的内容和面板不一致，请在 Obsidian 里检查' : '已保存');
-    if (next.again && !pendingDay) return requestSave(0);
+    if (next.again && !pending) return requestSave(0);
   }
-  if (pendingDay) goToDay(pendingDay); // goToDay saves anything typed meanwhile first
+  if (pending) goToDay(pending.date, pending.create); // goToDay saves anything typed meanwhile first
 };
 
 window.saveFailed = (message) => { inflight = false; setStatus('保存失败：' + message); };
@@ -326,6 +352,8 @@ window.conflict = (current) => {
 };
 
 window.flush = flush;
+// Opening the panel shows today's note, or this year's if you left it on a year.
+window.reopen = () => switchTo(current(shown() ?? isoDay()));
 window.focusEditor = () => {
   view.focus();
   if (!view.hasFocus) setTimeout(() => view.focus(), 30);

@@ -136,3 +136,31 @@ def test_a_missing_template_reads_as_empty(home):
     vault = make_vault(home, "Notes", daily={})
     register(home, vault)
     assert settings(home).template_text(date(2026, 3, 7)) == ""
+
+
+def test_year_notes_follow_periodic_notes_yearly_settings(home):
+    vault = make_vault(home, "Notes", daily={"folder": "D"})
+    plugin = vault / ".obsidian/plugins/periodic-notes"
+    plugin.mkdir(parents=True)
+    (plugin / "data.json").write_text(json.dumps({"yearly": {"enabled": True, "folder": "Years", "template": "T/year", "format": "[Y]YYYY"}}))
+    (vault / "T").mkdir()
+    (vault / "T/year.md").write_text("# {{date}} {{title}}\n")
+    register(home, vault)
+    s = settings(home)
+    assert s.year_path(2026) == vault / "Years/Y2026.md"
+    assert s.year_template_text(2026) == "# Y2026 Y2026\n"
+
+
+def test_year_notes_sit_beside_the_daily_notes_by_default(home):
+    vault = make_vault(home, "Notes", daily={"folder": "D"})
+    register(home, vault)
+    s = settings(home)
+    assert s.year_path(2026) == vault / "D/2026.md"
+    assert s.year_template_text(2026) == ""
+
+
+def test_the_config_can_place_year_notes(home):
+    vault = make_vault(home, "Notes", periodic={"enabled": True, "folder": "Days"})
+    register(home, vault)
+    configure(home, year_folder="Life/Years", year_format="YYYY[ 年报]")
+    assert settings(home).year_path(2026) == vault / "Life/Years/2026 年报.md"

@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,48 @@ def test_a_setup_problem_exits_2_with_the_reason_on_stderr(monkeypatch, capsys):
         run_main(monkeypatch, "--get", "2026-10-17")
     assert exc.value.code == 2
     assert "找不到 Obsidian vault" in capsys.readouterr().err
+
+
+@pytest.fixture
+def years(vault, tmp_path, monkeypatch):
+    s = capture.load_settings()
+    s.years = tmp_path / "Years"
+    return s.years
+
+
+def test_get_a_year_shows_a_missing_year_note_as_empty_without_creating_it(years, monkeypatch, capsys):
+    run_main(monkeypatch, "--get", "2026")
+    assert not (years / "2026.md").exists()
+    assert json.loads(capsys.readouterr().out) == {"date": "2026", "body": ""}
+
+
+def test_get_with_create_makes_the_year_note_ahead_of_time(years, monkeypatch, capsys):
+    run_main(monkeypatch, "--get", "2026", "--create")
+    assert (years / "2026.md").read_text() == ""
+    assert json.loads(capsys.readouterr().out) == {"date": "2026", "body": ""}
+
+
+def test_get_with_create_leaves_an_existing_year_note_alone(years, monkeypatch, capsys):
+    years.mkdir()
+    (years / "2026.md").write_text("目标\n")
+    run_main(monkeypatch, "--get", "2026", "--create")
+    assert json.loads(capsys.readouterr().out)["body"] == "目标\n"
+
+
+def test_set_writes_a_year_note(years, monkeypatch, capsys):
+    run_main(monkeypatch, "--set", "2026", "", "今年\n")
+    assert (years / "2026.md").read_text() == "今年\n"
+
+
+def test_set_a_year_note_changed_elsewhere_is_a_conflict(years, monkeypatch, capsys):
+    years.mkdir()
+    (years / "2026.md").write_text("别处\n")
+    with pytest.raises(SystemExit) as exit:
+        run_main(monkeypatch, "--set", "2026", "", "今年\n")
+    assert exit.value.code == 3
+    assert (years / "2026.md").read_text() == "别处\n"
+
+
+def test_doctor_prints_where_year_notes_go(years, monkeypatch, capsys):
+    run_main(monkeypatch, "--doctor")
+    assert str(years / f"{date.today().year}.md") in capsys.readouterr().out

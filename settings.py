@@ -2,7 +2,8 @@
 
 The vault comes from the config file, or else from Obsidian's own list of vaults when it knows
 exactly one. The daily-note folder, template and date format come from the vault's Daily notes
-(or Periodic Notes) settings; the config file can override each of them.
+(or Periodic Notes) settings; the config file can override each of them. Year notes follow
+Periodic Notes' yearly settings when that is on, else sit beside the daily notes as YYYY.md.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from pathlib import Path
 CONFIG = Path.home() / ".config/daily-note-capture/config.json"
 OBSIDIAN = Path.home() / "Library/Application Support/obsidian/obsidian.json"
 DEFAULT_FORMAT = "YYYY-MM-DD"
+YEAR_FORMAT = "YYYY"
 
 TOKEN = re.compile(r"\[([^\]]*)\]|([A-Za-z])\2*|.", re.S)
 PLACEHOLDER = re.compile(r"\{\{(date|title)(?::([^}]*))?\}\}")
@@ -42,11 +44,11 @@ def format_date(fmt, day):
     return "".join(out)
 
 
-def render_template(text, day, title):
+def render_template(text, day, title, date_format=DEFAULT_FORMAT):
     """Fill Obsidian's core template placeholders {{date}}, {{date:FORMAT}} and {{title}}."""
     def fill(m):
         try:
-            return title if m.group(1) == "title" else format_date(m.group(2) or DEFAULT_FORMAT, day)
+            return title if m.group(1) == "title" else format_date(m.group(2) or date_format, day)
         except SetupError:
             return m.group(0)
     return PLACEHOLDER.sub(fill, text)
@@ -73,6 +75,9 @@ class Settings:
     template: Path | None
     format: str
     config: dict = field(default_factory=dict)
+    years: Path | None = None  # None: beside the daily notes
+    year_template: Path | None = None
+    year_format: str = YEAR_FORMAT
 
     def note_path(self, day):
         return self.diary / (format_date(self.format, day) + ".md")
@@ -82,6 +87,15 @@ class Settings:
             return ""
         title = self.note_path(day).stem
         return render_template(self.template.read_text(encoding="utf-8"), day, title)
+
+    def year_path(self, year):
+        return (self.years or self.diary) / (format_date(self.year_format, date(year, 1, 1)) + ".md")
+
+    def year_template_text(self, year):
+        if not self.year_template or not self.year_template.is_file():
+            return ""
+        title = self.year_path(year).stem
+        return render_template(self.year_template.read_text(encoding="utf-8"), date(year, 1, 1), title, self.year_format)
 
 
 def _find_vault(config, obsidian_json):
@@ -110,6 +124,13 @@ def _daily_settings(vault):
     return core
 
 
+def _yearly_settings(vault, config):
+    periodic = (_read_json(vault / ".obsidian/plugins/periodic-notes/data.json") or {}).get("yearly") or {}
+    yearly = dict(periodic) if periodic.get("enabled") else {}
+    yearly.update({k: config["year_" + k] for k in ("folder", "template", "format") if "year_" + k in config})
+    return yearly
+
+
 def load(config_path=CONFIG, obsidian_json=OBSIDIAN):
     config = _read_json(config_path) or {}
     vault = _find_vault(config, obsidian_json)
@@ -118,5 +139,11 @@ def load(config_path=CONFIG, obsidian_json=OBSIDIAN):
     settings = Settings(vault=vault, diary=vault / folder if folder else vault,
                         template=_md(vault, daily.get("template")),
                         format=daily.get("format") or DEFAULT_FORMAT, config=config)
+    yearly = _yearly_settings(vault, config)
+    if "folder" in yearly:  # an empty folder is the vault root, as in Periodic Notes
+        year_folder = (yearly["folder"] or "").strip("/")
+        settings.years = vault / year_folder if year_folder else vault
+    settings.year_template = _md(vault, yearly.get("template"))
+    settings.year_format = yearly.get("format") or YEAR_FORMAT
     format_date(settings.format, date.today())  # an unsupported format fails here, not on first save
     return settings

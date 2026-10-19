@@ -31,8 +31,9 @@ local function run(args, callback, input)
   task:start()
 end
 
-local function load(day)
-  run({ SCRIPT, "--get", day or os.date("%Y-%m-%d") }, function(code, out, err)
+-- `day` is YYYY-MM-DD, or YYYY for a year note; `create` makes the note now instead of on first save.
+local function load(day, create)
+  run({ SCRIPT, "--get", day, create and "--create" or nil }, function(code, out, err)
     if code == 0 then
       js("loadNote", out)
       js("setZoom", tostring(hs.settings.get(ZOOM_KEY) or 1))
@@ -122,7 +123,7 @@ local function show()
   visible = true
   panel:show()
   focusPanel()
-  load()
+  js("reopen") -- the page asks for today's note, or this year's
   refreshIndex()
 end
 
@@ -180,7 +181,7 @@ local handlers = {
   hide = function() hide() end,
   drag = drag,
   resize = function(msg) resize(msg.edge or "rb") end,
-  load = function(msg) load(msg.date) end,
+  load = function(msg) load(msg.date, msg.create) end,
   attach = attach,
   open = open,
   zoom = function(msg) hs.settings.set(ZOOM_KEY, msg.level) end,
