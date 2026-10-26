@@ -61,12 +61,49 @@
 
 改了设置之后，运行 `.venv/bin/python capture.py --doctor` 确认读到的路径，再在 Hammerspoon 菜单里选 **Reload Config**。
 
+## 书模式（可选）
+
+给读书用的：在浮窗里搜任何一本书，点一下，浮窗就变成这本书的笔记，边读边写（或者开着语音输入一直说）。配置里有 `books` 一段时，顶部才会多出「书」按钮。
+
+```json
+{
+  "books": {
+    "folder": "Reading/Books",
+    "sources": [
+      { "path": "Reading/data/douban-read.json", "kind": "douban", "label": "读过" },
+      { "path": "Reading/data/douban-wish.json", "kind": "douban", "label": "想读" },
+      { "path": "Reading/data/weread.json", "kind": "weread", "label": "微信读书" }
+    ],
+    "template": "Templates/Book"
+  }
+}
+```
+
+| 键 | 作用 | 不写时 |
+|---|---|---|
+| `folder` | 书籍笔记放在哪个文件夹，相对 vault（必填） | — |
+| `sources` | 书单文件，相对 vault 或绝对路径。`kind` 是 `douban`（字段 `douban_id title author cover_url wish_date`）或 `weread`（字段 `bookId title author cover lastReadUpdate`）。同一本书在几个书单里都有时，排在前面的书单优先 | 没有书单，只有已有的书籍笔记和豆瓣搜索 |
+| `template` | 新书笔记的模板 | 一个简单的模板：书名、作者、封面、豆瓣链接，加上下面的段落 |
+| `section` | 写想法的那一段的标题 | `边读边想` |
+| `cover_folder` | 封面存在书籍文件夹下的哪个子文件夹 | `封面` |
+| `douban_search` | 搜索时要不要同时搜豆瓣 | `true` |
+
+模板里可以用 `{{title}}`、`{{author}}`、`{{cover}}`、`{{douban_id}}`、`{{douban_url}}`、`{{section}}`、`{{date}}`。除了 `{{title}}` 和 `{{section}}`，它们都会被填成可以直接放进 frontmatter 的值，没有时是 `null`，所以模板里不要再加引号，例如写 `cover: {{cover}}`。
+
+- **书架**：最上面是打开过的书，最近的在前；下面是所有书。封面边滚动边下载，缓存在 `~/Library/Caches/daily-note-capture/covers/`。
+- **搜索**：按书名、作者和笔记里的字搜，打开过的书排在前面。停下打字一会儿，下面会出现「豆瓣搜索」，书单里没有的书也能搜到、能打开。回车打开第一本。
+- **同一本书**：书名和作者都相同就算同一本书，不同版本合成一本。
+- **打开一本书**：浮窗变成这本书的笔记，光标停在「边读边想」里今天的日期下面。今天第一次打开时，日期会自动加上去。
+- **没写字不建文件**：还没有笔记的书，打开后显示的是模板；打下第一个字时才会真正建文件，同时把封面复制进 vault。只看不写的话，什么文件都不会留下。
+- 顶部的「← 书架」回到书架，「在 Obsidian 打开」在 Obsidian 里打开这篇笔记（笔记建好之后才会出现）。
+
 ## 开发
 
 - 结构：
   - `hammerspoon/`：窗口和快捷键（Lua）。
   - `popup/src/`：编辑器（CodeMirror 6）。
   - `capture.py`、`settings.py`、`vault.py`：读写日报（只用 Python 标准库）。
+  - `books.py`：书模式的书目、书籍笔记、封面和豆瓣搜索。
 - 改了 `popup/src/` 之后要运行 `npm install && npm run build`。打包好的 `popup/editor.bundle.js` 已经提交在仓库里，所以只是使用的话不需要 Node。
 - 测试：`.venv/bin/python -m pip install pytest && .venv/bin/python -m pytest`，`npm run test:js`，`npm run test:lua`（需要 `luajit`）。
 
