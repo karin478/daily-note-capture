@@ -9,6 +9,8 @@ Usage: python capture.py "text"   (or pipe text on stdin)
        python capture.py --index OUT.json               write note names, file paths and tags for the panel
        python capture.py --doctor                       show which vault, folder, template and format are used
        python capture.py --books OUT.json               write the book catalog for the panel's 书 mode
+       python capture.py --covers OUT.json < ITEMS.json  download covers ([{"key", "url"}]) -> {key: path or null}
+       python capture.py --douban-search Q              -> {"q", "items"} or {"q", "error": true}
        python capture.py --book-open < BOOK.json         -> {"date": "book:PATH", "body", "exists", "coverRel", "coverSrc"}
        python capture.py --set book:PATH BASE BODY [COVER_SRC COVER_REL]   a book's note, created on its first save
 
@@ -26,9 +28,11 @@ from pathlib import Path
 
 from settings import SetupError
 from settings import load as load_settings
-from books import build_catalog, cover_rel_for, note_rel_for, render_book_template
+from books import (SearchError, build_catalog, cover_rel_for, douban_search, download_covers, note_rel_for,
+                   render_book_template)
 from vault import attachment_folder, pasted_image_name, save_attachment, vault_index
 
+CACHE = Path.home() / "Library/Caches/daily-note-capture"  # the panel's cache; covers live in covers/
 PUSH_RE = re.compile(r"^---\s*\n+## 📥 Agent Push", re.M)
 
 
@@ -172,6 +176,17 @@ def run(settings, args):
         target = Path(args[1])
         _write_json(target, {"books": build_catalog(books, vault, target.parent), "section": books.section,
                              "doubanSearch": books.douban_search})
+        return
+    if args[:1] == ["--covers"]:
+        target = Path(args[1])
+        _write_json(target, download_covers(json.loads(sys.stdin.read()), target.parent))
+        return
+    if args[:1] == ["--douban-search"]:
+        q = args[1]
+        try:
+            print(json.dumps({"q": q, "items": douban_search(q, CACHE)}, ensure_ascii=False))
+        except SearchError:
+            print(json.dumps({"q": q, "error": True}, ensure_ascii=False))
         return
     if args[:1] == ["--book-open"]:
         _book_open(settings, json.loads(sys.stdin.read()))

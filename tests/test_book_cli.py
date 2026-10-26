@@ -137,3 +137,23 @@ def test_set_existing_book_note_copies_the_cover_it_now_points_at(books, tmp_pat
     run_main(monkeypatch, "--set", "book:Reading/Books/茶馆.md", "---\ncover: null\n---\n", body, str(cover), "Reading/Books/封面/茶馆.jpg")
     assert note.read_text() == body
     assert (books.books.folder / "封面" / "茶馆.jpg").read_bytes() == b"jpg"
+
+
+# ---- covers and Douban search ----
+import books as books_mod
+
+
+def test_covers_command_writes_paths(books, tmp_path, monkeypatch):
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: b"jpg")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps([{"key": "wr:1", "url": "https://res.weread.qq.com/1"}])))
+    out = tmp_path / "cache" / "covers-1.json"
+    run_main(monkeypatch, "--covers", str(out))
+    assert json.loads(out.read_text()) == {"wr:1": str(tmp_path / "cache" / "covers" / "wr_1.jpg")}
+
+
+def test_douban_search_command_reports_failure(books, monkeypatch, capsys):
+    def down(url, timeout):
+        raise OSError("offline")
+    monkeypatch.setattr(books_mod, "fetch", down)
+    run_main(monkeypatch, "--douban-search", "人月神话")
+    assert json.loads(capsys.readouterr().out) == {"q": "人月神话", "error": True}

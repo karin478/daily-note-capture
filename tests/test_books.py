@@ -220,3 +220,61 @@ def test_custom_template_is_used(lib):
     cfg = BooksConfig(folder=lib.folder, template=tpl, section="想法")
     assert render_book_template(cfg, book("人月神话"), None, date(2026, 10, 26)) == \
         "---\ntype: book-moc\nupdated: 2026-10-26\n---\n# 人月神话\n\n## 想法\n"
+
+
+# ---- covers and Douban search (no network: books.fetch is replaced) ----
+import urllib.error
+
+import books as books_mod
+from books import SearchError, cover_urls, douban_search, download_covers
+
+SUGGEST = json.dumps([
+    {"title": "人月神话", "url": "https://book.douban.com/subject/1102259/", "pic": "https://img9.doubanio.com/view/subject/s/public/s1086045.jpg",
+     "author_name": "[美] 弗雷德里克·布鲁克斯", "year": "2002", "type": "b", "id": "1102259"},
+    {"title": "人月神话", "url": "https://movie.douban.com/subject/9/", "pic": "", "type": "m", "id": "9"},
+]).encode()
+
+
+def test_cover_urls_try_large_first():
+    assert cover_urls("https://img9.doubanio.com/view/subject/s/public/s1.jpg") == [
+        "https://img9.doubanio.com/view/subject/l/public/s1.jpg",
+        "https://img9.doubanio.com/view/subject/m/public/s1.jpg",
+        "https://img9.doubanio.com/view/subject/s/public/s1.jpg"]
+    assert cover_urls("https://res.weread.qq.com/x") == ["https://res.weread.qq.com/x"]
+
+
+def test_download_covers_saves_and_reuses(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: calls.append(url) or b"jpg")
+    items = [{"key": "db:1", "url": "https://img9.doubanio.com/view/subject/s/public/s1.jpg"}]
+    first = download_covers(items, tmp_path)
+    assert first == {"db:1": str(tmp_path / "covers" / "db_1.jpg")}
+    assert (tmp_path / "covers" / "db_1.jpg").read_bytes() == b"jpg"
+    assert download_covers(items, tmp_path) == first
+    assert len(calls) == 1
+
+
+def test_cover_download_failure_returns_none(tmp_path, monkeypatch):
+    def down(url, timeout):
+        raise OSError("offline")
+    monkeypatch.setattr(books_mod, "fetch", down)
+    assert download_covers([{"key": "db:1", "url": "https://img9.doubanio.com/view/subject/s/public/s1.jpg"}], tmp_path) == {"db:1": None}
+    assert list((tmp_path / "covers").glob("*")) == []
+
+
+def test_douban_search_maps_results(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: seen.update(url=url, timeout=timeout) or SUGGEST)
+    assert douban_search("人月 神话", tmp_path) == [{
+        "key": "db:1102259", "title": "人月神话", "author": "[美] 弗雷德里克·布鲁克斯", "doubanId": "1102259", "aliases": [],
+        "coverUrl": "https://img9.doubanio.com/view/subject/s/public/s1086045.jpg", "cover": None,
+        "source": "豆瓣搜索", "note": None, "text": ""}]
+    assert seen == {"url": "https://book.douban.com/j/subject_suggest?q=%E4%BA%BA%E6%9C%88+%E7%A5%9E%E8%AF%9D", "timeout": 5}
+
+
+def test_douban_search_failure_is_reported(tmp_path, monkeypatch):
+    def down(url, timeout):
+        raise urllib.error.URLError("offline")
+    monkeypatch.setattr(books_mod, "fetch", down)
+    with pytest.raises(SearchError):
+        douban_search("人月神话", tmp_path)

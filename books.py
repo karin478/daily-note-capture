@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import re
 import sys
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 TITLE_MARKS = re.compile(r"[《》“”‘’\"'「」（）()\[\]【】]")
@@ -233,3 +236,76 @@ def render_book_template(cfg, book, cover_rel, day):
     for name, value in values.items():
         text = text.replace("{{" + name + "}}", value)
     return render_template(text, day, book["title"])
+
+
+# ---- covers and Douban search ----
+
+USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+              "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+DOUBAN_SIZE = re.compile(r"(/view/subject/)[^/]+(/public/)")
+SUGGEST = "https://book.douban.com/j/subject_suggest?q="
+
+
+class SearchError(Exception):
+    pass
+
+
+def fetch(url, timeout):
+    """GET a URL the way a browser on douban.com would; Douban's images refuse other referrers."""
+    headers = {"User-Agent": USER_AGENT}
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host.endswith(("douban.com", "doubanio.com")):
+        headers["Referer"] = "https://book.douban.com/"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+        return response.read()
+
+
+def cover_urls(url):
+    """A Douban cover large first, then the smaller sizes; anything else as it is."""
+    if not DOUBAN_SIZE.search(url):
+        return [url]
+    return [DOUBAN_SIZE.sub(rf"\g<1>{size}\g<2>", url) for size in ("l", "m", "s")]
+
+
+def _download(item, folder):
+    target = folder / cover_cache_name(item["key"])
+    if target.exists():
+        return str(target)
+    for url in cover_urls(item["url"]):
+        try:
+            data = fetch(url, 10)
+        except (OSError, ValueError):
+            continue
+        if data:
+            tmp = target.with_suffix(".tmp")
+            tmp.write_bytes(data)
+            tmp.replace(target)
+            return str(target)
+    return None
+
+
+def download_covers(items, cache_dir, workers=4):
+    """Covers into the cache, a few at a time: {key: path, or None when no size could be fetched}."""
+    folder = Path(cache_dir) / "covers"
+    folder.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        paths = list(pool.map(lambda item: _download(item, folder), items))
+    return {item["key"]: path for item, path in zip(items, paths)}
+
+
+def douban_search(q, cache_dir):
+    """Books Douban suggests for a query, as catalog entries."""
+    try:
+        results = json.loads(fetch(SUGGEST + urllib.parse.quote_plus(q), 5))
+    except (OSError, ValueError) as err:
+        raise SearchError(str(err)) from err
+    books = []
+    for r in results if isinstance(results, list) else []:
+        if r.get("type") != "b" or not r.get("id"):
+            continue
+        key = f"db:{r['id']}"
+        cover = Path(cache_dir) / "covers" / cover_cache_name(key)
+        books.append({"key": key, "title": r.get("title") or "", "author": r.get("author_name") or None,
+                      "doubanId": str(r["id"]), "aliases": [], "coverUrl": r.get("pic") or None,
+                      "cover": str(cover) if cover.exists() else None, "source": "豆瓣搜索", "note": None, "text": ""})
+    return books
