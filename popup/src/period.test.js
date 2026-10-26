@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { current, isYear, shift, title, yearOf } from './period.js';
+import { current, isBook, isYear, shift, title, yearOf } from './period.js';
 
 const now = new Date(2026, 9, 19);
 
@@ -24,4 +24,14 @@ test('the current note of each kind is today or this year', () => {
 test('the header names the day with its weekday, or the year', () => {
   assert.equal(title('2026-10-19'), '2026-10-19 周一');
   assert.equal(title('2026'), '2026 年');
+});
+
+test('a book key names a book note by its vault path; it never steps', () => {
+  const key = 'book:Reading/Books/茶馆：成都.md';
+  assert.equal(isBook(key), true);
+  assert.equal(isBook('2026'), false);
+  assert.equal(isYear(key), false);
+  assert.equal(title(key), '茶馆：成都');
+  assert.equal(shift(key, 1), key);
+  assert.equal(current(key, now), key);
 });
