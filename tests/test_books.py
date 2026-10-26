@@ -161,3 +161,62 @@ def test_weread_title_with_an_edition_note_merges(lib):
 def test_volumes_of_a_series_stay_apart(lib):
     lib.lists["weread"] = [weread("W1", "Bloodline (Cradle Book 9)", last=2), weread("W2", "Bloodline (Cradle Book 8)", last=1)]
     assert [b["key"] for b in lib.catalog()] == ["wr:W1", "wr:W2"]
+
+
+# ---- a book's note ----
+from datetime import date
+
+from books import cover_rel_for, note_rel_for, render_book_template, safe_name
+
+
+def book(title, author=None, id=None, aliases=(), note=None):
+    return {"key": f"db:{id}" if id else "wr:x", "title": title, "author": author, "doubanId": id,
+            "aliases": list(aliases), "note": note, "cover": None}
+
+
+def test_note_name_is_filesystem_safe():
+    assert safe_name('A/B: C?') == 'A／B： C？'
+    assert safe_name('.hidden') == 'hidden'
+    assert safe_name('《》') == '未命名'
+
+
+def test_existing_note_is_kept(lib):
+    cfg = BooksConfig(folder=lib.folder)
+    assert note_rel_for(book("茶馆", note="Reading/Books/茶馆：成都.md"), cfg, lib.vault) == "Reading/Books/茶馆：成都.md"
+
+
+def test_new_note_goes_in_the_book_folder(lib):
+    cfg = BooksConfig(folder=lib.folder)
+    assert note_rel_for(book("《人月神话》"), cfg, lib.vault) == "Reading/Books/人月神话.md"
+
+
+def test_new_note_path_avoids_another_books_file(lib):
+    lib.note("茶馆", title="茶馆", douban_id='"X"')
+    cfg = BooksConfig(folder=lib.folder)
+    assert note_rel_for(book("茶馆", "[中] 老舍", "Y"), cfg, lib.vault) == "Reading/Books/茶馆 (老舍).md"
+    assert note_rel_for(book("茶馆", "王笛", "Z", aliases=["X"]), cfg, lib.vault) == "Reading/Books/茶馆.md"
+
+
+def test_cover_goes_beside_the_note(lib):
+    cfg = BooksConfig(folder=lib.folder)
+    assert cover_rel_for(cfg, lib.vault, "Reading/Books/人月神话.md") == "Reading/Books/封面/人月神话.jpg"
+
+
+def test_default_template_renders_yaml_values(lib):
+    cfg = BooksConfig(folder=lib.folder)
+    bare = render_book_template(cfg, book("无名书"), None, date(2026, 10, 26))
+    assert "author: null\ncover: null\ndouban_id: null\ndouban_url: null\ncreated: 2026-10-26\n" in bare
+    assert bare.startswith("---\ntitle: 无名书\n")
+    assert bare.rstrip("\n").endswith("# 无名书\n\n## 边读边想")
+    full = render_book_template(cfg, book("人月神话", "布鲁克斯", "1102259"), "Reading/Books/封面/人月神话.jpg", date(2026, 10, 26))
+    assert 'cover: "[[Reading/Books/封面/人月神话.jpg]]"' in full
+    assert 'douban_id: "1102259"\ndouban_url: https://book.douban.com/subject/1102259/\n' in full
+    assert "author: 布鲁克斯\n" in full
+
+
+def test_custom_template_is_used(lib):
+    tpl = lib.vault / "Book.md"
+    tpl.write_text("---\ntype: book-moc\nupdated: {{date}}\n---\n# {{title}}\n\n## {{section}}\n", encoding="utf-8")
+    cfg = BooksConfig(folder=lib.folder, template=tpl, section="想法")
+    assert render_book_template(cfg, book("人月神话"), None, date(2026, 10, 26)) == \
+        "---\ntype: book-moc\nupdated: 2026-10-26\n---\n# 人月神话\n\n## 想法\n"

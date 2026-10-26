@@ -171,3 +171,65 @@ def build_catalog(cfg, vault, cache_dir):
         out.append({"key": key, **{k: v for k, v in book.items() if not k.startswith("_")},
                     "cover": str(cover) if cover.exists() else None})
     return out
+
+
+# ---- a book's note ----
+
+UNSAFE = str.maketrans({"/": "／", "\\": "＼", ":": "：", "*": "＊", "?": "？", '"': "＂", "<": "＜", ">": "＞", "|": "｜"})
+
+DEFAULT_TEMPLATE = """---
+title: {{title}}
+author: {{author}}
+cover: {{cover}}
+douban_id: {{douban_id}}
+douban_url: {{douban_url}}
+created: {{date}}
+---
+
+# {{title}}
+
+## {{section}}
+"""
+
+
+def safe_name(title):
+    """A note's file name: the normalized title with the characters a file name can't hold made full-width."""
+    return normalize_title(title).translate(UNSAFE).lstrip(".").strip() or "未命名"
+
+
+def note_rel_for(book, cfg, vault):
+    """Where a book's note is, or would be: the title, plus the author when another book has that name."""
+    if book.get("note"):
+        return book["note"]
+    folder = Path(cfg.folder).relative_to(vault).as_posix()
+    name = safe_name(book["title"])
+    path = Path(cfg.folder) / f"{name}.md"
+    if path.exists():
+        owner = read_frontmatter(path.read_text(encoding="utf-8"))[0].get("douban_id")
+        if owner and owner != book.get("doubanId") and owner not in (book.get("aliases") or []):
+            name = f"{name} ({primary_author(book.get('author')) or book.get('doubanId') or 2})"
+    return f"{folder}/{name}.md"
+
+
+def cover_rel_for(cfg, vault, note_rel):
+    folder = Path(cfg.folder).relative_to(vault).as_posix()
+    return f"{folder}/{cfg.cover_folder}/{Path(note_rel).stem}.jpg"
+
+
+def render_book_template(cfg, book, cover_rel, day):
+    """A new note: the configured template (or a plain one) with each placeholder as a ready YAML value."""
+    from settings import render_template
+
+    template = cfg.template
+    text = template.read_text(encoding="utf-8") if template and template.is_file() else DEFAULT_TEMPLATE
+    douban_id = book.get("doubanId")
+    values = {
+        "author": book.get("author") or "null",
+        "cover": f'"[[{cover_rel}]]"' if cover_rel else "null",
+        "douban_id": f'"{douban_id}"' if douban_id else "null",
+        "douban_url": f"https://book.douban.com/subject/{douban_id}/" if douban_id else "null",
+        "section": cfg.section,
+    }
+    for name, value in values.items():
+        text = text.replace("{{" + name + "}}", value)
+    return render_template(text, day, book["title"])
