@@ -11,6 +11,7 @@ import { markdownExtension, newlineInList, previewRanges, toggleTask } from './p
 import { clock, isoDay } from './timeline.js';
 import { current, isBook, isYear, shift, title, yearOf } from './period.js';
 import { prepareBookNote } from './booknote.js';
+import { mergeEdit } from './merge.js';
 import { fileUrl } from './shelf.js';
 import { createShelf } from './shelfview.js';
 import { afterSave } from './autosave.js';
@@ -166,7 +167,7 @@ function goToDay(day, create = false) {
 let books = { section: '边读边想' }; // from Hammerspoon: the catalog's settings
 let onShelf = false;
 let book = null; // the open book: { entry, exists, coverSrc, coverRel }
-let opening = null; // the catalog entry asked for, until its note arrives
+let opening = null; // the catalog entry last asked for: only its note may open
 
 function openBook(entry) {
   pending = { book: entry };
@@ -175,6 +176,7 @@ function openBook(entry) {
     pending = null;
     opening = entry;
     shelf.opened(entry);
+    setStatus('打开中…');
     post({ action: 'openBook', book: entry });
   }
 }
@@ -412,14 +414,18 @@ window.loadNote = ({ date, body }) => {
 };
 
 // A book's note, or the template for a book that has none yet; prepared with today's date to talk under.
-window.loadBook = ({ date, body, exists, coverSrc, coverRel }) => {
+window.loadBook = ({ key, date, body, exists, coverSrc, coverRel }) => {
+  if (key !== opening?.key) return; // an earlier click's answer, overtaken by a later click
   if (unsaved() && date === noteDate) return;
+  if (unsaved()) { // typed into the note on screen while this one was opening: save that first, then open
+    pending = { book: opening };
+    return flush();
+  }
   rememberPlace(); // reopening the book you are in keeps your place on the same day
   const entry = opening ?? book?.entry;
   const fill = exists && entry ? { author: entry.author, doubanId: entry.doubanId, cover: coverRel && `"[[${coverRel}]]"` } : {};
   const ready = prepareBookNote(body, { section: books.section, day: isoDay(), fill, remembered: places.has(date) });
   book = { entry, exists, coverSrc, coverRel };
-  opening = null;
   showNote(date, body, ready.body, ready.cursor);
 };
 
@@ -460,10 +466,24 @@ window.saveFailed = (message) => { inflight = false; setStatus('保存失败：'
 window.conflict = (current) => {
   inflight = false;
   if (current.date !== noteDate) return;
+  if (isBook(current.date)) {
+    // A book's note is often written to by reading-capture while the panel stays open: keep what was just
+    // said on top of that change when they don't overlap.
+    const merged = mergeEdit(base, view.state.doc.toString(), current.body);
+    if (merged) {
+      const head = view.state.selection.main.head;
+      base = current.body;
+      pristine = null;
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: merged.body },
+        selection: { anchor: Math.min(head + merged.shift, merged.body.length) } });
+      setStatus('笔记在别处被改过，已接上你刚写的');
+      return requestSave(0);
+    }
+  }
   base = view.state.doc.toString(); // force the reload below
   pristine = null;
   if (isBook(current.date)) {
-    window.loadBook({ ...current, exists: true, coverSrc: book?.coverSrc, coverRel: book?.coverRel });
+    window.loadBook({ ...current, key: opening?.key, exists: true, coverSrc: book?.coverSrc, coverRel: book?.coverRel });
     setStatus('笔记在别处被改过，已刷新为最新内容');
     return;
   }

@@ -88,7 +88,10 @@
 | `cover_folder` | 封面存在书籍文件夹下的哪个子文件夹 | `封面` |
 | `douban_search` | 搜索时要不要同时搜豆瓣 | `true` |
 
-模板里可以用 `{{title}}`、`{{author}}`、`{{cover}}`、`{{douban_id}}`、`{{douban_url}}`、`{{section}}`、`{{date}}`。除了 `{{title}}` 和 `{{section}}`，它们都会被填成可以直接放进 frontmatter 的值，没有时是 `null`，所以模板里不要再加引号，例如写 `cover: {{cover}}`。
+模板里可以用 `{{title}}`、`{{author}}`、`{{cover}}`、`{{douban_id}}`、`{{douban_url}}`、`{{section}}`、`{{date}}`。
+
+- 在 frontmatter 里，它们会被填成可以直接用的值：需要时自动加引号，没有值时是 `null`。所以模板里**不要自己加引号**，写 `title: {{title}}`、`cover: {{cover}}` 就行。
+- 在正文里，`{{title}}` 和 `{{author}}` 是原样的文字，没有作者时是空的。
 
 - **书架**：最上面是打开过的书，最近的在前；下面是所有书。封面边滚动边下载，缓存在 `~/Library/Caches/daily-note-capture/covers/`。
 - **搜索**：按书名、作者和笔记里的字搜，打开过的书排在前面。停下打字一会儿，下面会出现「豆瓣搜索」，书单里没有的书也能搜到、能打开。回车打开第一本。
