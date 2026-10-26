@@ -76,6 +76,11 @@ def _doctor(settings):
     print(f"日期格式:  {settings.format}")
     print(f"今天的日报: {settings.note_path(date.today())}")
     print(f"今年的年报: {settings.year_path(date.today().year)}")
+    books = settings.books
+    if books:
+        print(f"书籍文件夹: {books.folder}")
+        print(f"书目来源: {len(books.sources)} 个（{'、'.join(s.label for s in books.sources)}）")
+        print(f"豆瓣搜索: {'开' if books.douban_search else '关'}")
 
 
 def main():

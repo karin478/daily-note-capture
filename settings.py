@@ -69,6 +69,23 @@ def _md(vault, name):
 
 
 @dataclass
+class BookSource:
+    path: Path
+    kind: str  # "douban" or "weread": how its fields are read
+    label: str
+
+
+@dataclass
+class BooksConfig:
+    folder: Path
+    sources: list = field(default_factory=list)
+    douban_search: bool = True
+    template: Path | None = None
+    section: str = "边读边想"
+    cover_folder: str = "封面"
+
+
+@dataclass
 class Settings:
     vault: Path
     diary: Path
@@ -78,6 +95,7 @@ class Settings:
     years: Path | None = None  # None: beside the daily notes
     year_template: Path | None = None
     year_format: str = YEAR_FORMAT
+    books: BooksConfig | None = None  # None: no 书 mode
 
     def note_path(self, day):
         return self.diary / (format_date(self.format, day) + ".md")
@@ -131,6 +149,23 @@ def _yearly_settings(vault, config):
     return yearly
 
 
+BOOK_KINDS = ("douban", "weread")
+
+
+def _books(vault, books):
+    """Book mode is on only when the config has a "books" section."""
+    if not books.get("folder"):
+        raise SetupError(f"书模式的配置缺少 folder（书籍笔记文件夹）：{CONFIG}")
+    sources = []
+    for source in books.get("sources") or []:
+        if source.get("kind") not in BOOK_KINDS:
+            raise SetupError(f"书目来源的 kind 不认识：{source.get('kind')}（只支持 {' / '.join(BOOK_KINDS)}）")
+        sources.append(BookSource(vault / Path(source["path"]).expanduser(), source["kind"], source.get("label") or ""))
+    return BooksConfig(folder=vault / books["folder"].strip("/"), sources=sources,
+                       douban_search=books.get("douban_search", True), template=_md(vault, books.get("template")),
+                       section=books.get("section") or "边读边想", cover_folder=books.get("cover_folder") or "封面")
+
+
 def load(config_path=CONFIG, obsidian_json=OBSIDIAN):
     config = _read_json(config_path) or {}
     vault = _find_vault(config, obsidian_json)
@@ -145,5 +180,7 @@ def load(config_path=CONFIG, obsidian_json=OBSIDIAN):
         settings.years = vault / year_folder if year_folder else vault
     settings.year_template = _md(vault, yearly.get("template"))
     settings.year_format = yearly.get("format") or YEAR_FORMAT
+    if config.get("books"):
+        settings.books = _books(vault, config["books"])
     format_date(settings.format, date.today())  # an unsupported format fails here, not on first save
     return settings

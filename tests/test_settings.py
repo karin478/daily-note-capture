@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -164,3 +165,48 @@ def test_the_config_can_place_year_notes(home):
     register(home, vault)
     configure(home, year_folder="Life/Years", year_format="YYYY[ 年报]")
     assert settings(home).year_path(2026) == vault / "Life/Years/2026 年报.md"
+
+
+# ---- book mode ----
+
+def book_settings(home, books):
+    vault = make_vault(home, "Notes", daily={})
+    register(home, vault)
+    configure(home, books=books)
+    return vault, settings(home)
+
+
+def test_books_absent_means_none(home):
+    vault = make_vault(home, "Notes", daily={})
+    register(home, vault)
+    assert settings(home).books is None
+
+
+def test_books_paths_resolve_against_vault(home):
+    vault, s = book_settings(home, {"folder": "R/书籍",
+                                    "sources": [{"path": "data/a.json", "kind": "douban", "label": "读过"}]})
+    b = s.books
+    assert b.folder == vault / "R/书籍"
+    assert b.sources[0].path == vault / "data/a.json"
+    assert (b.sources[0].kind, b.sources[0].label) == ("douban", "读过")
+    assert (b.section, b.cover_folder, b.douban_search, b.template) == ("边读边想", "封面", True, None)
+
+
+def test_books_absolute_source_path_kept(home):
+    _, s = book_settings(home, {"folder": "R", "sources": [{"path": "/tmp/x.json", "kind": "weread", "label": "微信读书"}]})
+    assert s.books.sources[0].path == Path("/tmp/x.json")
+
+
+def test_books_template_resolves_like_daily_template(home):
+    vault, s = book_settings(home, {"folder": "R", "sources": [], "template": "Templates/Book"})
+    assert s.books.template == vault / "Templates/Book.md"
+
+
+def test_books_unknown_kind_is_setup_error(home):
+    with pytest.raises(SetupError, match="goodreads"):
+        book_settings(home, {"folder": "R", "sources": [{"path": "a.json", "kind": "goodreads", "label": "x"}]})
+
+
+def test_books_without_folder_is_setup_error(home):
+    with pytest.raises(SetupError, match="folder"):
+        book_settings(home, {"sources": []})
