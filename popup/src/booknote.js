@@ -16,12 +16,20 @@ const lineEnd = (text, at) => {
   return nl < 0 ? text.length : nl + 1;
 };
 
+// books.yaml_value: as it is when YAML reads it back unchanged, else double-quoted.
+export function yamlValue(s) {
+  const plain = s && !/^[[\]{}!&*#?|\->%@`"',: ]/.test(s) && !s.includes(': ') && !s.includes(' #') && !/[: ]$/.test(s)
+    && !['null', '~', 'true', 'false', 'yes', 'no', 'on', 'off'].includes(s.toLowerCase()) && !/^[-+.\d_eE]+$/.test(s)
+    && !s.includes('\n');
+  return plain ? s : JSON.stringify(s);
+}
+
 // Empty frontmatter fields the book list knows get filled; `updated` follows today.
 function frontmatter(head, { author, cover, doubanId }, day) {
   const fill = (name, value) => {
     if (value) head = head.replace(new RegExp(`^${name}:[ \\t]*(null|~)?[ \\t]*$`, 'm'), `${name}: ${value}`);
   };
-  fill('author', author);
+  fill('author', author && yamlValue(author));
   fill('cover', cover);
   fill('douban_id', doubanId && `"${doubanId}"`);
   return head.replace(/^updated:.*$/m, `updated: ${day}`);

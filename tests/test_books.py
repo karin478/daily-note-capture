@@ -278,3 +278,13 @@ def test_douban_search_failure_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(books_mod, "fetch", down)
     with pytest.raises(SearchError):
         douban_search("人月神话", tmp_path)
+
+
+def test_frontmatter_values_are_yaml_safe(lib):
+    cfg = BooksConfig(folder=lib.folder)
+    text = render_book_template(cfg, book("Designing Data: The Big Ideas", "[美] 某人 / 译者"), None, date(2026, 10, 26))
+    assert 'title: "Designing Data: The Big Ideas"\n' in text
+    assert 'author: "[美] 某人 / 译者"\n' in text
+    assert "# Designing Data: The Big Ideas\n" in text
+    plain = render_book_template(cfg, book("人月神话", "王笛"), None, date(2026, 10, 26))
+    assert "title: 人月神话\nauthor: 王笛\n" in plain

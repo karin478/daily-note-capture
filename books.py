@@ -219,20 +219,36 @@ def cover_rel_for(cfg, vault, note_rel):
     return f"{folder}/{cfg.cover_folder}/{Path(note_rel).stem}.jpg"
 
 
+YAML_PLAIN_START = set("[]{}!&*#?|->%@`\"',: ")
+YAML_WORDS = {"null", "~", "true", "false", "yes", "no", "on", "off"}
+
+
+def yaml_value(s):
+    """A string as a frontmatter value: as it is when YAML reads it back unchanged, else double-quoted."""
+    plain = (s and s[0] not in YAML_PLAIN_START and ": " not in s and " #" not in s and not s.endswith((":", " "))
+             and s.lower() not in YAML_WORDS and not re.fullmatch(r"[-+.\d_eE]+", s) and "\n" not in s)
+    return s if plain else json.dumps(s, ensure_ascii=False)
+
+
 def render_book_template(cfg, book, cover_rel, day):
-    """A new note: the configured template (or a plain one) with each placeholder as a ready YAML value."""
+    """A new note: the configured template (or a plain one). In the frontmatter each placeholder is a ready
+    YAML value; below it the title and author are as they are."""
     from settings import render_template
 
     template = cfg.template
     text = template.read_text(encoding="utf-8") if template and template.is_file() else DEFAULT_TEMPLATE
-    douban_id = book.get("doubanId")
+    douban_id, author = book.get("doubanId"), book.get("author")
     values = {
-        "author": book.get("author") or "null",
         "cover": f'"[[{cover_rel}]]"' if cover_rel else "null",
         "douban_id": f'"{douban_id}"' if douban_id else "null",
         "douban_url": f"https://book.douban.com/subject/{douban_id}/" if douban_id else "null",
         "section": cfg.section,
     }
+    fm = FRONTMATTER.match(text)
+    head, body = (text[:fm.end()], text[fm.end():]) if fm else ("", text)
+    head = head.replace("{{title}}", yaml_value(book["title"])).replace("{{author}}", yaml_value(author) if author else "null")
+    body = body.replace("{{author}}", author or "")
+    text = head + body
     for name, value in values.items():
         text = text.replace("{{" + name + "}}", value)
     return render_template(text, day, book["title"])

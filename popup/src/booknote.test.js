@@ -53,3 +53,8 @@ test('null frontmatter fields are filled, set ones are kept', () => {
 test('updated is set to today only when the field exists', () => {
   assert.ok(!prepareBookNote('---\ntitle: x\n---\n## 边读边想\n', opts()).body.includes('updated'));
 });
+
+test('a filled-in author that YAML would misread is quoted', () => {
+  const out = prepareBookNote('---\nauthor: null\n---\n## 边读边想\n', opts({ fill: { author: '[美] 布鲁克斯 / 汪颖' } }));
+  assert.ok(out.body.startsWith('---\nauthor: "[美] 布鲁克斯 / 汪颖"\n---\n'));
+});
