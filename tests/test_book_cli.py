@@ -157,3 +157,25 @@ def test_douban_search_command_reports_failure(books, monkeypatch, capsys):
     monkeypatch.setattr(books_mod, "fetch", down)
     run_main(monkeypatch, "--douban-search", "人月神话")
     assert json.loads(capsys.readouterr().out) == {"q": "人月神话", "error": True}
+
+
+def test_book_open_fetches_a_missing_cover(books, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(capture, "CACHE", tmp_path / "cache")
+    seen = []
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: seen.append(timeout) or b"jpg")
+    got = open_book(monkeypatch, capsys, {"key": "db:7", "title": "新书", "doubanId": "7", "aliases": [], "note": None,
+                                          "cover": None, "coverUrl": "https://img1.doubanio.com/view/subject/s/public/s7.jpg"})
+    assert got["coverSrc"] == str(tmp_path / "cache" / "covers" / "db_7.jpg")
+    assert 'cover: "[[Reading/Books/封面/新书.jpg]]"' in got["body"]
+    assert seen == [3]
+
+
+def test_book_open_without_network_still_opens(books, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(capture, "CACHE", tmp_path / "cache")
+    def down(url, timeout):
+        raise OSError("offline")
+    monkeypatch.setattr(books_mod, "fetch", down)
+    got = open_book(monkeypatch, capsys, {"key": "db:7", "title": "新书", "doubanId": "7", "aliases": [], "note": None,
+                                          "cover": None, "coverUrl": "https://img1.doubanio.com/view/subject/s/public/s7.jpg"})
+    assert (got["coverSrc"], got["exists"]) == (None, False)
+    assert "cover: null" in got["body"]

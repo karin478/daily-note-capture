@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { arrange, mergeDouban, normalizeQuery, placeholderHue } from './shelf.js';
+import { arrange, fileUrl, mergeDouban, normalizeQuery, placeholderHue, primaryAuthor, withOpened } from './shelf.js';
 
 const book = (key, title, extra = {}) => ({ key, title, author: null, doubanId: null, aliases: [], text: '', ...extra });
 const BOOKS = [
@@ -49,4 +49,29 @@ test('the placeholder colour is stable for a title', () => {
   assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360);
   assert.equal(placeholderHue('人月神话'), hue);
   assert.notEqual(placeholderHue('茶馆'), hue);
+});
+
+test('a local file becomes a file URL with each path part encoded', () => {
+  assert.equal(fileUrl('/Users/a b/封面/人月#1.jpg'), 'file:///Users/a%20b/%E5%B0%81%E9%9D%A2/%E4%BA%BA%E6%9C%88%231.jpg');
+});
+
+test('Douban results that are another edition of a shelf book (same title and author) are dropped', () => {
+  const results = [
+    book('db:7', '人月神话', { doubanId: '7', author: '弗雷德里克・布鲁克斯' }),
+    book('db:8', '人月神话', { doubanId: '8', author: '另一个人' }),
+  ];
+  assert.deepEqual(keys(mergeDouban(BOOKS, results)), ['db:8']);
+});
+
+test('the first author is compared without nationality marks, spaces or dot styles', () => {
+  assert.equal(primaryAuthor('[美] 弗雷德里克.布鲁克斯 / 汪颖'), '弗雷德里克·布鲁克斯');
+  assert.equal(primaryAuthor('弗雷德里克・布鲁克斯'), '弗雷德里克·布鲁克斯');
+  assert.equal(primaryAuthor(null), '');
+});
+
+test('a book opened from Douban joins the shelf, so it shows among the recent ones', () => {
+  const extra = book('db:9', '凤凰架构', { doubanId: '9' });
+  const shelf = withOpened(BOOKS, [extra, BOOKS[0]]);
+  assert.deepEqual(keys(shelf), ['db:9', ...keys(BOOKS)]);
+  assert.deepEqual(keys(arrange(shelf, '', { 'db:9': 5 }).recent), ['db:9']);
 });

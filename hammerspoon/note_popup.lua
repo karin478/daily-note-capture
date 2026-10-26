@@ -14,9 +14,13 @@ local WIDTH, HEIGHT = 560, 680
 local MIN_W, MIN_H = 360, 260
 local FRAME_KEY = "notePopup.frame"
 local ZOOM_KEY = "notePopup.zoom"
-local INDEX_FILE = HOME .. "/Library/Caches/daily-note-capture/index.json"
+local CACHE = HOME .. "/Library/Caches/daily-note-capture"
+local INDEX_FILE = CACHE .. "/index.json"
+local BOOKS_FILE = CACHE .. "/books.json"
+local RECENT_KEY = "notePopup.recentBooks"
+local MAX_RECENT = 200
 
-local panel, previousApp, mouseTimer, index, indexData, indexedAt
+local panel, previousApp, mouseTimer, index, indexData, indexedAt, booksData, booksAt
 local visible, focused = false, false
 local placement = require("placement")
 local hotkey = require("hotkey")
@@ -60,8 +64,76 @@ local function refreshIndex()
   end)
 end
 
+-- 书 mode: the catalog, like the index, comes from the last build at once and is rebuilt at most once a
+-- minute. Without a books section in the config --books fails and the 书 button stays hidden.
+local function readFile(path, remove)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local data = f:read("a")
+  f:close()
+  if remove then os.remove(path) end
+  return data
+end
+
+local function sendRecents()
+  js("setRecents", hs.json.encode(hs.settings.get(RECENT_KEY) or {}))
+end
+
+local function refreshBooks()
+  if booksData then
+    js("setBooks", booksData)
+    sendRecents()
+  end
+  if booksAt and os.time() - booksAt < 60 then return end
+  booksAt = os.time()
+  run({ SCRIPT, "--books", BOOKS_FILE }, function(code)
+    local data = code == 0 and readFile(BOOKS_FILE)
+    if data then
+      booksData = data
+      js("setBooks", data)
+      sendRecents()
+    end
+  end)
+end
+
+-- When each book was last opened; only the latest MAX_RECENT are kept.
+local function remember(key)
+  local recent = hs.settings.get(RECENT_KEY) or {}
+  recent[key] = os.time()
+  local keys = {}
+  for k in pairs(recent) do keys[#keys + 1] = k end
+  if #keys > MAX_RECENT then
+    table.sort(keys, function(a, b) return recent[a] > recent[b] end)
+    for i = MAX_RECENT + 1, #keys do recent[keys[i]] = nil end
+  end
+  hs.settings.set(RECENT_KEY, recent)
+end
+
+local function openBook(msg)
+  local book = msg.book or {}
+  if book.key then remember(book.key) end
+  run({ SCRIPT, "--book-open" }, function(code, out, err)
+    if code == 0 then js("loadBook", out)
+    else hs.alert.show("✗ 打开书失败：" .. (err or ""), 5) end
+  end, hs.json.encode(book))
+end
+
+local function covers(msg)
+  local file = string.format("%s/covers-%d-%d.json", CACHE, os.time(), math.random(1000000))
+  run({ SCRIPT, "--covers", file }, function(code)
+    js("coversLoaded", code == 0 and readFile(file, true) or "{}")
+  end, hs.json.encode(msg.items or {}))
+end
+
+local function doubanSearch(msg)
+  run({ SCRIPT, "--douban-search", msg.q or "" }, function(code, out)
+    js("doubanResults", code == 0 and out or hs.json.encode({ q = msg.q, error = true }))
+  end)
+end
+
 local function save(msg)
-  run({ SCRIPT, "--set", msg.date, msg.base, msg.body }, function(code, out, err)
+  -- a book's note names its cover to copy in, until the copy is made
+  run({ SCRIPT, "--set", msg.date, msg.base, msg.body, msg.coverSrc, msg.coverRel }, function(code, out, err)
     if code == 0 then
       js("saved", out)
     elseif code == 3 then
@@ -123,8 +195,9 @@ local function show()
   visible = true
   panel:show()
   focusPanel()
-  js("reopen") -- the page asks for today's note, or this year's
+  js("reopen") -- the page asks for today's note, or this year's, or the book or shelf it was on
   refreshIndex()
+  refreshBooks()
 end
 
 local function saveFrame()
@@ -184,6 +257,9 @@ local handlers = {
   load = function(msg) load(msg.date, msg.create) end,
   attach = attach,
   open = open,
+  openBook = openBook,
+  covers = covers,
+  doubanSearch = doubanSearch,
   zoom = function(msg) hs.settings.set(ZOOM_KEY, msg.level) end,
   focus = function(msg) focused = msg.focused and visible end,
 }

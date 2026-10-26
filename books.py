@@ -267,13 +267,13 @@ def cover_urls(url):
     return [DOUBAN_SIZE.sub(rf"\g<1>{size}\g<2>", url) for size in ("l", "m", "s")]
 
 
-def _download(item, folder):
+def _download(item, folder, timeout=10, tries=3):
     target = folder / cover_cache_name(item["key"])
     if target.exists():
         return str(target)
-    for url in cover_urls(item["url"]):
+    for url in cover_urls(item["url"])[:tries]:
         try:
-            data = fetch(url, 10)
+            data = fetch(url, timeout)
         except (OSError, ValueError):
             continue
         if data:
@@ -291,6 +291,13 @@ def download_covers(items, cache_dir, workers=4):
     with ThreadPoolExecutor(max_workers=workers) as pool:
         paths = list(pool.map(lambda item: _download(item, folder), items))
     return {item["key"]: path for item, path in zip(items, paths)}
+
+
+def download_cover(key, url, cache_dir):
+    """One cover, now, for a book being opened: a single quick try at the large size."""
+    folder = Path(cache_dir) / "covers"
+    folder.mkdir(parents=True, exist_ok=True)
+    return _download({"key": key, "url": url}, folder, timeout=3, tries=1)
 
 
 def douban_search(q, cache_dir):

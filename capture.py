@@ -28,8 +28,8 @@ from pathlib import Path
 
 from settings import SetupError
 from settings import load as load_settings
-from books import (SearchError, build_catalog, cover_rel_for, douban_search, download_covers, note_rel_for,
-                   render_book_template)
+from books import (SearchError, build_catalog, cover_rel_for, douban_search, download_cover, download_covers,
+                   note_rel_for, render_book_template)
 from vault import attachment_folder, pasted_image_name, save_attachment, vault_index
 
 CACHE = Path.home() / "Library/Caches/daily-note-capture"  # the panel's cache; covers live in covers/
@@ -100,6 +100,8 @@ def _book_open(settings, book):
     cover_rel = cover_rel_for(books, vault, rel)
     in_vault = (vault / cover_rel).exists()
     exists = path.exists()
+    if not cover_src and not in_vault and book.get("coverUrl"):
+        cover_src = download_cover(book["key"], book["coverUrl"], CACHE)  # not scrolled into view yet
     body = path.read_text(encoding="utf-8") if exists else \
         render_book_template(books, book, cover_rel if cover_src or in_vault else None, date.today())
     print(json.dumps({"date": "book:" + rel, "body": body, "exists": exists,

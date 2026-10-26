@@ -66,19 +66,42 @@
           transition:opacity .15s; }
   #zoom.show { opacity:.9; }
   .foot { padding:6px 16px 10px; color:var(--muted); font-size:11px; }
+  [hidden] { display:none !important; }
+  /* 书 mode: the shelf, and the header of a book's note */
+  #booktitle { color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  #shelf { flex:1; min-height:0; display:flex; flex-direction:column; }
+  #shelf-search { margin:2px 14px 8px; padding:6px 10px; font:inherit; font-size:14px; color:var(--fg); background:var(--code);
+                  border:1px solid var(--line); border-radius:8px; outline:none; }
+  #shelf-search:focus { border-color:var(--accent); }
+  #shelf-list { flex:1; min-height:0; overflow-y:auto; padding:0 14px 16px; }
+  .shelf-heading { color:var(--muted); font-size:12px; margin:10px 2px 6px; }
+  .shelf-message { color:var(--muted); font-size:13px; margin:8px 2px; }
+  .shelf-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:14px 12px; }
+  .shelf-book { display:flex; flex-direction:column; gap:5px; padding:0; border:0; background:none; color:var(--fg);
+                font:inherit; font-size:12px; text-align:center; cursor:pointer; min-width:0; }
+  .shelf-cover { width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:4px; box-shadow:0 2px 6px rgba(0,0,0,.18);
+                 display:block; box-sizing:border-box; }
+  .shelf-placeholder { display:flex; align-items:center; justify-content:center; padding:8px; color:#fff; font-size:12px;
+                       line-height:1.35; overflow:hidden; text-shadow:0 1px 2px rgba(0,0,0,.25); }
+  .shelf-book:hover .shelf-cover, .shelf-book:focus-visible .shelf-cover { outline:2px solid var(--accent); outline-offset:2px; }
+  .shelf-book:focus { outline:none; }
+  .shelf-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .shelf-end { height:1px; }
 </style>
 </head>
 <body>
 <div class="box">
   <div class="head">
     <div class="nav">
-      <div class="mode"><button data-mode="day" class="on" title="日报">日</button><button data-mode="year" title="年报">年</button></div>
+      <div class="mode"><button data-mode="day" class="on" title="日报">日</button><button data-mode="year" title="年报">年</button><button data-mode="book" title="书" hidden>书</button></div>
       <button id="prev" title="前一天 ⌘[">‹</button><span id="day">Note</span><button id="next" title="后一天 ⌘]">›</button>
       <button id="today" hidden>回到今天</button>
+      <button id="back" hidden>← 书架</button><span id="booktitle" hidden></span>
     </div>
-    <div class="tools"><span id="status"></span></div>
+    <div class="tools"><button id="obsidian" hidden>在 Obsidian 打开</button><span id="status"></span></div>
   </div>
   <div id="editor"></div>
+  <div id="shelf" hidden><input id="shelf-search" placeholder="搜书名 / 作者 / 笔记里的词…" autocomplete="off" spellcheck="false"><div id="shelf-list"></div></div>
   <div class="foot">自动保存 · ⌘T 时间 · ⌘[ ⌘] 前后切换 · ⌘± 缩放 · Esc 关闭</div>
 </div>
 <div id="zoom"></div>

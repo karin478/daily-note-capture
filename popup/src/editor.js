@@ -1,4 +1,5 @@
-// The panel's editor: a whole daily (or yearly) note as plain markdown, rendered Obsidian-style, autosaved.
+// The panel's editor: a whole daily, yearly or book note as plain markdown, rendered Obsidian-style, autosaved.
+// 书 mode adds a shelf of books in front of the editor.
 import { EditorState } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, WidgetType, drawSelection, keymap, placeholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -8,7 +9,10 @@ import { tags as t } from '@lezer/highlight';
 import { deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { markdownExtension, newlineInList, previewRanges, toggleTask } from './preview.js';
 import { clock, isoDay } from './timeline.js';
-import { current, isYear, shift, title, yearOf } from './period.js';
+import { current, isBook, isYear, shift, title, yearOf } from './period.js';
+import { prepareBookNote } from './booknote.js';
+import { fileUrl } from './shelf.js';
+import { createShelf } from './shelfview.js';
 import { afterSave } from './autosave.js';
 import { tagCompletions, wikilinkCompletions } from './completion.js';
 import { embedFor, htmlToMarkdown, isImage, linkOverSelection } from './paste.js';
@@ -25,7 +29,6 @@ const setStatus = (text) => { $('status').textContent = text; };
 // Vault index from Hammerspoon: note names, file paths and tags.
 let index = { vault: '', notes: [], files: {}, tags: [] };
 
-const fileUrl = (path) => 'file://' + path.split('/').map(encodeURIComponent).join('/');
 function resolveFile(target) {
   if (target.includes('/')) return index.vault && `${index.vault}/${target}`;
   return index.files[target] || null;
@@ -123,12 +126,16 @@ const markdownStyle = HighlightStyle.define([
 ]);
 
 // Autosave: each change is saved after a short pause; one save in flight at a time.
-let noteDate = null; // the note's key: YYYY-MM-DD, or YYYY for a year note
+let noteDate = null; // the note's key: YYYY-MM-DD, YYYY for a year note, book:PATH for a book's
 let base = '';
+// A book's note opens with additions (its section, today's date) that are only saved once you type:
+// while the editor still shows exactly that, there is nothing to save.
+let pristine = null;
+const unsaved = () => { const body = view.state.doc.toString(); return body !== base && body !== pristine; };
 let timer = null;
 let inflight = false;
 let sent = null; // the body of the save in flight
-let pending = null; // a note to switch to once the current one is saved: { date, create }
+let pending = null; // a note to switch to once the current one is saved: { date, create } or { book }
 
 function requestSave(delay = SAVE_DELAY) {
   clearTimeout(timer);
@@ -138,27 +145,55 @@ function requestSave(delay = SAVE_DELAY) {
 function flush() {
   clearTimeout(timer);
   const body = view.state.doc.toString();
-  if (inflight || noteDate === null || body === base) return;
+  if (inflight || noteDate === null || !unsaved()) return;
   inflight = true;
   sent = body;
   setStatus('保存中…');
-  post({ action: 'save', date: noteDate, base, body });
+  const cover = isBook(noteDate) && book?.coverRel ? { coverSrc: book.coverSrc, coverRel: book.coverRel } : {};
+  post({ action: 'save', date: noteDate, base, body, ...cover });
 }
 
 function goToDay(day, create = false) {
   pending = { date: day, create };
   flush();
-  if (!inflight && view.state.doc.toString() === base) {
+  if (!inflight && !unsaved()) {
     pending = null;
     post({ action: 'load', date: day, create });
   }
 }
+
+// ---- 书 mode: the shelf, and the book whose note is open ----
+let books = { section: '边读边想' }; // from Hammerspoon: the catalog's settings
+let onShelf = false;
+let book = null; // the open book: { entry, exists, coverSrc, coverRel }
+let opening = null; // the catalog entry asked for, until its note arrives
+
+function openBook(entry) {
+  pending = { book: entry };
+  flush();
+  if (!inflight && !unsaved()) {
+    pending = null;
+    opening = entry;
+    shelf.opened(entry);
+    post({ action: 'openBook', book: entry });
+  }
+}
+
+function showShelf() {
+  flush();
+  onShelf = true;
+  renderMode();
+  shelf.reset();
+  shelf.focus();
+}
+
+const shelf = createShelf($('shelf'), { post, onOpen: openBook });
 // Quick repeated steps add up: the header follows at once and only the day you stop on loads.
 let wantedDay = null, stepTimer = null;
 const shown = () => wantedDay ?? noteDate;
 const stepDay = (delta) => () => {
   const from = shown();
-  if (!from) return true;
+  if (!from || onShelf || isBook(from)) return true;
   const day = (wantedDay = shift(from, delta));
   renderTitle(day);
   clearTimeout(stepTimer);
@@ -276,15 +311,33 @@ window.attached = ({ id, name, path }) => {
   view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, scrollIntoView: true });
 };
 
-// ---- Header: which note, and 日 / 年 ----
+// ---- Header: which note, and 日 / 年 / 书 ----
+const modeOf = (key) => (onShelf || isBook(key ?? '') ? 'book' : isYear(key ?? '') ? 'year' : 'day');
+
 function renderTitle(day = noteDate) {
-  const year = isYear(day);
+  const mode = modeOf(day);
+  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === mode);
+  for (const id of ['prev', 'day', 'next']) $(id).hidden = mode === 'book';
+  $('back').hidden = $('booktitle').hidden = mode !== 'book' || onShelf;
+  $('obsidian').hidden = mode !== 'book' || onShelf || !book?.exists;
+  if (mode === 'book') {
+    $('today').hidden = true;
+    if (!onShelf) $('booktitle').textContent = title(day);
+    return;
+  }
+  const year = mode === 'year';
   $('day').textContent = title(day);
   $('today').textContent = year ? '回到今年' : '回到今天';
   $('today').hidden = day === current(day);
   $('prev').title = year ? '前一年 ⌘[' : '前一天 ⌘[';
   $('next').title = year ? '后一年 ⌘]' : '后一天 ⌘]';
-  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', (b.dataset.mode === 'year') === year);
+}
+
+// The shelf or the editor, and the header to match.
+function renderMode() {
+  $('shelf').hidden = !onShelf;
+  $('editor').hidden = onShelf;
+  renderTitle();
 }
 
 // The header follows at once; a year note is created as soon as you open it.
@@ -295,16 +348,26 @@ function switchTo(key) {
   goToDay(key, isYear(key));
 }
 
-let lastDay = null; // 日 brings you back to the day you left for the year
+let lastDay = null; // 日 brings you back to the day you left for the year, or for 书
 for (const b of document.querySelectorAll('[data-mode]')) {
   b.addEventListener('click', () => {
     const from = shown() ?? isoDay();
-    if ((b.dataset.mode === 'year') === isYear(from)) return;
-    if (isYear(from)) return switchTo(lastDay ?? isoDay());
-    lastDay = from;
-    switchTo(yearOf(from));
+    const want = b.dataset.mode;
+    if (want === 'book') {
+      if (!isYear(from) && !isBook(from)) lastDay = from;
+      return showShelf();
+    }
+    if (want === modeOf(from)) return;
+    if (want === 'day') return switchTo(lastDay ?? isoDay());
+    if (!isBook(from) && !onShelf) lastDay = from;
+    switchTo(yearOf(lastDay ?? isoDay()));
   });
 }
+$('back').addEventListener('click', showShelf);
+$('obsidian').addEventListener('click', () => {
+  flush();
+  post({ action: 'open', target: noteDate.slice('book:'.length) });
+});
 $('prev').addEventListener('click', stepDay(-1));
 $('next').addEventListener('click', stepDay(1));
 $('today').addEventListener('click', () => switchTo(current(shown() ?? isoDay())));
@@ -318,25 +381,56 @@ function rememberPlace() {
 }
 
 // ---- API called from Hammerspoon ----
-window.loadNote = ({ date, body }) => {
-  const editing = view.state.doc.toString() !== base;
-  if (editing && date === noteDate) return; // keep unsaved typing; it saves against `base`
+
+// `body` is what the file holds; `shown` what the editor starts with; `cursor` >= 0 puts the cursor there.
+function showNote(date, body, shown = body, cursor = -1) {
+  if (unsaved() && date === noteDate) return; // keep unsaved typing; it saves against `base`
   rememberPlace();
-  const place = placeFor(places.get(date), body.length);
+  const place = cursor >= 0 ? { anchor: cursor, head: cursor, scrollTop: null } : placeFor(places.get(date), shown.length);
   noteDate = date;
   wantedDay = null;
   base = body;
+  pristine = shown;
   view.dispatch({
     // an unchanged note is left as it is, so nothing on screen moves
-    changes: body === view.state.doc.toString() ? [] : { from: 0, to: view.state.doc.length, insert: body },
+    changes: shown === view.state.doc.toString() ? [] : { from: 0, to: view.state.doc.length, insert: shown },
     selection: { anchor: place.anchor, head: place.head },
     scrollIntoView: place.scrollTop === null, // the first time: at the end, ready to keep writing
   });
   if (place.scrollTop !== null) view.scrollDOM.scrollTop = place.scrollTop;
   clearTimeout(timer);
-  renderTitle();
+  const fromShelf = onShelf;
+  onShelf = false;
+  renderMode();
   setStatus('');
+  if (fromShelf) window.focusEditor();
+}
+
+window.loadNote = ({ date, body }) => {
+  book = null;
+  showNote(date, body);
 };
+
+// A book's note, or the template for a book that has none yet; prepared with today's date to talk under.
+window.loadBook = ({ date, body, exists, coverSrc, coverRel }) => {
+  if (unsaved() && date === noteDate) return;
+  rememberPlace(); // reopening the book you are in keeps your place on the same day
+  const entry = opening ?? book?.entry;
+  const fill = exists && entry ? { author: entry.author, doubanId: entry.doubanId, cover: coverRel && `"[[${coverRel}]]"` } : {};
+  const ready = prepareBookNote(body, { section: books.section, day: isoDay(), fill, remembered: places.has(date) });
+  book = { entry, exists, coverSrc, coverRel };
+  opening = null;
+  showNote(date, body, ready.body, ready.cursor);
+};
+
+window.setBooks = (data) => {
+  books = data;
+  document.querySelector('[data-mode="book"]').hidden = false;
+  shelf.setBooks(data.books, data.doubanSearch);
+};
+window.setRecents = (recents) => shelf.setRecents(recents);
+window.coversLoaded = (paths) => shelf.coversLoaded(paths);
+window.doubanResults = (result) => shelf.doubanResults(result);
 
 window.setIndex = (idx) => {
   index = idx;
@@ -348,10 +442,17 @@ window.saved = ({ date, body }) => {
   if (date === noteDate) {
     const next = afterSave({ sent, stored: body, now: view.state.doc.toString() });
     base = next.base;
+    pristine = null; // saved: from now on any change is a change
+    if (book && isBook(date)) {
+      book.exists = true;
+      book.coverRel = null; // copied in with this save
+      renderTitle();
+    }
     setStatus(next.mismatch ? '文件里存下的内容和面板不一致，请在 Obsidian 里检查' : '已保存');
     if (next.again && !pending) return requestSave(0);
   }
-  if (pending) goToDay(pending.date, pending.create); // goToDay saves anything typed meanwhile first
+  if (pending?.book) openBook(pending.book); // these save anything typed meanwhile first
+  else if (pending) goToDay(pending.date, pending.create);
 };
 
 window.saveFailed = (message) => { inflight = false; setStatus('保存失败：' + message); };
@@ -360,14 +461,26 @@ window.conflict = (current) => {
   inflight = false;
   if (current.date !== noteDate) return;
   base = view.state.doc.toString(); // force the reload below
+  pristine = null;
+  if (isBook(current.date)) {
+    window.loadBook({ ...current, exists: true, coverSrc: book?.coverSrc, coverRel: book?.coverRel });
+    setStatus('笔记在别处被改过，已刷新为最新内容');
+    return;
+  }
   window.loadNote(current);
   setStatus('日报在别处被改过，已刷新为最新内容');
 };
 
 window.flush = flush;
-// Opening the panel shows today's note, or this year's if you left it on a year.
-window.reopen = () => switchTo(current(shown() ?? isoDay()));
+// Opening the panel shows today's note, or this year's if you left it on a year; in 书 mode the shelf,
+// or the book you were in (a new day gets its date).
+window.reopen = () => {
+  if (onShelf) return showShelf();
+  if (isBook(noteDate ?? '') && book?.entry) return openBook(book.entry);
+  switchTo(current(shown() ?? isoDay()));
+};
 window.focusEditor = () => {
+  if (onShelf) return shelf.focus();
   view.focus();
   if (!view.hasFocus) setTimeout(() => view.focus(), 30);
 };

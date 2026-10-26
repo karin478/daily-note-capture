@@ -27,10 +27,24 @@ export function arrange(books, query, recents) {
   return { recent: [], all: hits.map((h) => h.book) };
 }
 
-// Douban's suggestions, minus the books the shelf already has under any of their Douban ids.
+// books.primary_author: the first author, without nationality marks, spaces or dot styles.
+export const primaryAuthor = (s) =>
+  (s ?? '').split('/')[0].replace(/\[[^\]]*\]|【[^】]*】|\([^)]*\)|（[^）]*）/g, '').replace(/\s+/g, '').replace(/[.•・]/g, '·');
+
+// Douban's suggestions, minus the books the shelf already has: by any of their Douban ids, or as another
+// edition (the same title and author, the catalog's rule for one book).
 export function mergeDouban(shown, results) {
   const ids = new Set(shown.flatMap((b) => [b.doubanId, ...(b.aliases ?? [])]).filter(Boolean));
-  return results.filter((r) => !ids.has(r.doubanId));
+  const byTitle = new Map();
+  for (const b of shown) {
+    const t = normalizeQuery(b.title);
+    byTitle.set(t, [...(byTitle.get(t) ?? []), primaryAuthor(b.author)]);
+  }
+  const edition = (r) => {
+    const a = primaryAuthor(r.author);
+    return (byTitle.get(normalizeQuery(r.title)) ?? []).some((b) => !a || !b || a === b);
+  };
+  return results.filter((r) => !ids.has(r.doubanId) && !edition(r));
 }
 
 // A cover with no picture gets a colour of its own, the same every time.
@@ -39,3 +53,11 @@ export function placeholderHue(title) {
   for (const ch of title ?? '') h = (h * 31 + ch.codePointAt(0)) % 360;
   return h;
 }
+
+export const fileUrl = (path) => 'file://' + path.split('/').map(encodeURIComponent).join('/');
+
+// Books opened from Douban's results aren't in the catalog until they have a note; keep them on the shelf.
+export const withOpened = (books, opened) => {
+  const known = new Set(books.map((b) => b.key));
+  return [...opened.filter((b) => !known.has(b.key)), ...books];
+};
