@@ -8,6 +8,7 @@ Usage: python capture.py "text"   (or pipe text on stdin)
        python capture.py --attach NAME [EXT] < base64   save a pasted/dropped file where Obsidian puts attachments
        python capture.py --index OUT.json               write note names, file paths and tags for the panel
        python capture.py --doctor                       show which vault, folder, template and format are used
+       python capture.py --books OUT.json               write the book catalog for the panel's 书 mode
 
 Where the notes are comes from settings.py: the Obsidian vault and its Daily notes settings.
 """
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from settings import SetupError
 from settings import load as load_settings
+from books import build_catalog
 from vault import attachment_folder, pasted_image_name, save_attachment, vault_index
 
 PUSH_RE = re.compile(r"^---\s*\n+## 📥 Agent Push", re.M)
@@ -83,6 +85,23 @@ def _doctor(settings):
         print(f"豆瓣搜索: {'开' if books.douban_search else '关'}")
 
 
+def _books(settings):
+    """Book mode's settings; the book commands stop here when the config has none."""
+    if not settings.books:
+        print("没有配置书模式（config.json 的 books）", file=sys.stderr)
+        sys.exit(2)
+    return settings.books
+
+
+def _write_json(target, data):
+    """Big results go through a file: hs.task pipes don't carry hundreds of KB intact."""
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(target)
+
+
 def main():
     try:
         settings = load_settings()
@@ -103,11 +122,13 @@ def run(settings, args):
         print(json.dumps(save_attachment(attachment_folder(vault, settings.diary), name, data), ensure_ascii=False))
         return
     if args[:1] == ["--index"]:
+        _write_json(args[1], {**vault_index(vault), "vaultName": vault.name})
+        return
+    if args[:1] == ["--books"]:
+        books = _books(settings)
         target = Path(args[1])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(json.dumps({**vault_index(vault), "vaultName": vault.name}, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(target)
+        _write_json(target, {"books": build_catalog(books, vault, target.parent), "section": books.section,
+                             "doubanSearch": books.douban_search})
         return
     if args[:1] == ["--get"]:
         day = args[1] if len(args) > 1 else date.today().isoformat()
