@@ -61,18 +61,40 @@ def _entry(title, author, source, douban_id=None, cover_url=None, weread_id=None
             "_weread": weread_id, "_title": normalize_title(title), "_author": primary_author(author)}
 
 
+def _text(value):
+    """A field as text whatever the list stored: None stays None, a list of names is joined."""
+    if value is None or value == "":
+        return None
+    return " / ".join(map(str, value)) if isinstance(value, list) else str(value)
+
+
+def _douban_book(i, label):
+    return _entry(_text(i["title"]), _text(i.get("author")), label, _text(i.get("douban_id")), _text(i.get("cover_url")))
+
+
+def _weread_book(i, label):
+    book = _entry(re.sub(r"^《([^》]*)》", r"\1", _text(i["title"])), _text(i.get("author")), label,
+                  cover_url=_text(i.get("cover")), weread_id=_text(i.get("bookId")))
+    book["_bare"] = normalize_title(BRACKETED.sub("", book["title"]))
+    return book
+
+
 def _from_source(source):
     items = _read_list(source)
     if source.kind == "douban":
         if any(item.get("wish_date") for item in items):
-            items = sorted(items, key=lambda i: i.get("wish_date") or "", reverse=True)
-        return [_entry(i["title"], i.get("author"), source.label, str(i.get("douban_id") or "") or None,
-                       i.get("cover_url")) for i in items]
-    items = sorted(items, key=lambda i: i.get("lastReadUpdate") or 0, reverse=True)
-    books = [_entry(re.sub(r"^《([^》]*)》", r"\1", i["title"]), i.get("author"), source.label,
-                    cover_url=i.get("cover"), weread_id=i.get("bookId")) for i in items]
-    for book in books:
-        book["_bare"] = normalize_title(BRACKETED.sub("", book["title"]))
+            items = sorted(items, key=lambda i: str(i.get("wish_date") or ""), reverse=True)
+        make = _douban_book
+    else:
+        items = sorted(items, key=lambda i: i.get("lastReadUpdate") if isinstance(i.get("lastReadUpdate"), (int, float)) else 0,
+                       reverse=True)
+        make = _weread_book
+    books = []
+    for item in items:
+        try:
+            books.append(make(item, source.label))
+        except (TypeError, ValueError, AttributeError) as err:  # one odd record never costs the whole shelf
+            print(f"跳过 {source.path} 里的一条：{err}", file=sys.stderr)
     return books
 
 
@@ -178,7 +200,9 @@ def build_catalog(cfg, vault, cache_dir):
 
 # ---- a book's note ----
 
-UNSAFE = str.maketrans({"/": "／", "\\": "＼", ":": "：", "*": "＊", "?": "？", '"': "＂", "<": "＜", ">": "＞", "|": "｜"})
+# What a file name can't hold, and what would break an Obsidian link to it (# heading, ^ block).
+UNSAFE = str.maketrans({"/": "／", "\\": "＼", ":": "：", "*": "＊", "?": "？", '"': "＂", "<": "＜", ">": "＞", "|": "｜",
+                        "#": "＃", "^": "＾"})
 
 DEFAULT_TEMPLATE = """---
 title: {{title}}
@@ -208,9 +232,14 @@ def note_rel_for(book, cfg, vault):
     name = safe_name(book["title"])
     path = Path(cfg.folder) / f"{name}.md"
     if path.exists():
-        owner = read_frontmatter(path.read_text(encoding="utf-8"))[0].get("douban_id")
-        if owner and owner != book.get("doubanId") and owner not in (book.get("aliases") or []):
-            name = f"{name} ({primary_author(book.get('author')) or book.get('doubanId') or 2})"
+        fields = read_frontmatter(path.read_text(encoding="utf-8"))[0]
+        owner, author = fields.get("douban_id"), primary_author(book.get("author"))
+        if owner:
+            other = owner != book.get("doubanId") and owner not in (book.get("aliases") or [])
+        else:  # no Douban id to tell by: the same title by another author is another book
+            other = bool(author) and bool(primary_author(fields.get("author"))) and primary_author(fields.get("author")) != author
+        if other:
+            name = f"{name} ({(author or book.get('doubanId') or '2').translate(UNSAFE)})"
     return f"{folder}/{name}.md"
 
 
@@ -276,8 +305,13 @@ def fetch(url, timeout):
         return response.read()
 
 
+IMAGE_MAGIC = (b"\xff\xd8\xff", b"\x89PNG", b"GIF8", b"RIFF")
+
+
 def cover_urls(url):
-    """A Douban cover large first, then the smaller sizes; anything else as it is."""
+    """A Douban cover large first, then the smaller sizes; anything else as it is. Only web addresses."""
+    if not url.startswith(("https://", "http://")):
+        return []
     if not DOUBAN_SIZE.search(url):
         return [url]
     return [DOUBAN_SIZE.sub(rf"\g<1>{size}\g<2>", url) for size in ("l", "m", "s")]
@@ -290,9 +324,9 @@ def _download(item, folder, timeout=10, tries=3):
     for url in cover_urls(item["url"])[:tries]:
         try:
             data = fetch(url, timeout)
-        except (OSError, ValueError):
+        except Exception:  # a cover is never worth failing for: any network error is a missing cover
             continue
-        if data:
+        if data and data.startswith(IMAGE_MAGIC):  # not a blocked-request page saved as a picture
             tmp = target.with_suffix(".tmp")
             tmp.write_bytes(data)
             tmp.replace(target)
@@ -320,7 +354,7 @@ def douban_search(q, cache_dir):
     """Books Douban suggests for a query, as catalog entries."""
     try:
         results = json.loads(fetch(SUGGEST + urllib.parse.quote_plus(q), 5))
-    except (OSError, ValueError) as err:
+    except Exception as err:  # any network or parse failure is "search unavailable"
         raise SearchError(str(err)) from err
     books = []
     for r in results if isinstance(results, list) else []:

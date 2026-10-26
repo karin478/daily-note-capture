@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+JPEG = b"\xff\xd8\xffjpg"  # what a downloaded cover starts with
+
 import capture
 from settings import BookSource, BooksConfig, Settings
 
@@ -88,7 +90,7 @@ def test_book_open_existing_note_returns_file(books, monkeypatch, capsys):
     note.write_text("# 茶馆\n", encoding="utf-8")
     got = open_book(monkeypatch, capsys, {"key": "db:1", "title": "茶馆", "author": None, "doubanId": "1",
                                           "aliases": [], "note": "Reading/Books/茶馆.md", "cover": None})
-    assert got == {"date": "book:Reading/Books/茶馆.md", "body": "# 茶馆\n", "exists": True,
+    assert got == {"key": "db:1", "date": "book:Reading/Books/茶馆.md", "body": "# 茶馆\n", "exists": True,
                    "coverRel": None, "coverSrc": None}
 
 
@@ -144,7 +146,7 @@ import books as books_mod
 
 
 def test_covers_command_writes_paths(books, tmp_path, monkeypatch):
-    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: b"jpg")
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: JPEG)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps([{"key": "wr:1", "url": "https://res.weread.qq.com/1"}])))
     out = tmp_path / "cache" / "covers-1.json"
     run_main(monkeypatch, "--covers", str(out))
@@ -162,7 +164,7 @@ def test_douban_search_command_reports_failure(books, monkeypatch, capsys):
 def test_book_open_fetches_a_missing_cover(books, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(capture, "CACHE", tmp_path / "cache")
     seen = []
-    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: seen.append(timeout) or b"jpg")
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: seen.append(timeout) or JPEG)
     got = open_book(monkeypatch, capsys, {"key": "db:7", "title": "新书", "doubanId": "7", "aliases": [], "note": None,
                                           "cover": None, "coverUrl": "https://img1.doubanio.com/view/subject/s/public/s7.jpg"})
     assert got["coverSrc"] == str(tmp_path / "cache" / "covers" / "db_7.jpg")
@@ -179,3 +181,8 @@ def test_book_open_without_network_still_opens(books, tmp_path, monkeypatch, cap
                                           "cover": None, "coverUrl": "https://img1.doubanio.com/view/subject/s/public/s7.jpg"})
     assert (got["coverSrc"], got["exists"]) == (None, False)
     assert "cover: null" in got["body"]
+
+
+def test_book_open_says_which_book_it_answers(books, monkeypatch, capsys):
+    got = open_book(monkeypatch, capsys, {"key": "db:1", "title": "茶馆", "doubanId": "1", "aliases": [], "note": None, "cover": None})
+    assert got["key"] == "db:1"

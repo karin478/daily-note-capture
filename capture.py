@@ -104,7 +104,7 @@ def _book_open(settings, book):
         cover_src = download_cover(book["key"], book["coverUrl"], CACHE)  # not scrolled into view yet
     body = path.read_text(encoding="utf-8") if exists else \
         render_book_template(books, book, cover_rel if cover_src or in_vault else None, date.today())
-    print(json.dumps({"date": "book:" + rel, "body": body, "exists": exists,
+    print(json.dumps({"key": book.get("key"), "date": "book:" + rel, "body": body, "exists": exists,
                       "coverRel": cover_rel if cover_src and not in_vault else None,
                       "coverSrc": cover_src}, ensure_ascii=False))
 

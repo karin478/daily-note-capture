@@ -3,6 +3,8 @@ import os
 
 import pytest
 
+JPEG = b"\xff\xd8\xffjpg"  # what a downloaded cover starts with
+
 from books import build_catalog, normalize_title, primary_author
 from settings import BookSource, BooksConfig
 
@@ -245,11 +247,11 @@ def test_cover_urls_try_large_first():
 
 def test_download_covers_saves_and_reuses(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: calls.append(url) or b"jpg")
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: calls.append(url) or JPEG)
     items = [{"key": "db:1", "url": "https://img9.doubanio.com/view/subject/s/public/s1.jpg"}]
     first = download_covers(items, tmp_path)
     assert first == {"db:1": str(tmp_path / "covers" / "db_1.jpg")}
-    assert (tmp_path / "covers" / "db_1.jpg").read_bytes() == b"jpg"
+    assert (tmp_path / "covers" / "db_1.jpg").read_bytes() == JPEG
     assert download_covers(items, tmp_path) == first
     assert len(calls) == 1
 
@@ -288,3 +290,54 @@ def test_frontmatter_values_are_yaml_safe(lib):
     assert "# Designing Data: The Big Ideas\n" in text
     plain = render_book_template(cfg, book("人月神话", "王笛"), None, date(2026, 10, 26))
     assert "title: 人月神话\nauthor: 王笛\n" in plain
+
+
+# ---- final review fixes ----
+
+def test_same_name_note_of_another_author_is_not_reused(lib):
+    lib.note("孤独", title="孤独", author="甲")
+    cfg = BooksConfig(folder=lib.folder)
+    assert note_rel_for(book("孤独", "乙", "2"), cfg, lib.vault) == "Reading/Books/孤独 (乙).md"
+    assert note_rel_for(book("孤独", "甲", "1"), cfg, lib.vault) == "Reading/Books/孤独.md"
+
+
+def test_a_malformed_record_is_skipped_not_fatal(lib):
+    lib.lists["read"] = [douban("A", "好书", "甲"), {"douban_id": 5, "title": 1984, "author": ["奥威尔"]}, {"title": None}]
+    lib.lists["weread"] = [{"bookId": 7, "title": "整数编号", "author": None}]
+    assert [b["key"] for b in lib.catalog()] == ["db:A", "db:5", "wr:7"]
+
+
+def test_names_are_safe_for_obsidian_links_too(lib):
+    assert safe_name("C#高级编程^2") == "C＃高级编程＾2"
+    lib.note("孤独", title="孤独", douban_id='"X"')
+    cfg = BooksConfig(folder=lib.folder)
+    assert note_rel_for(book("孤独", "A#B", "Y"), cfg, lib.vault) == "Reading/Books/孤独 (A＃B).md"
+
+
+def test_cover_download_survives_any_error_and_rejects_non_images(tmp_path, monkeypatch):
+    import http.client
+
+    def broken(url, timeout):
+        raise http.client.IncompleteRead(b"")
+    monkeypatch.setattr(books_mod, "fetch", broken)
+    assert download_covers([{"key": "db:1", "url": "https://img9.doubanio.com/view/subject/s/public/s1.jpg"}], tmp_path) == {"db:1": None}
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: b"<html>blocked</html>")
+    assert download_covers([{"key": "db:2", "url": "https://img9.doubanio.com/view/subject/s/public/s2.jpg"}], tmp_path) == {"db:2": None}
+    assert list((tmp_path / "covers").glob("*")) == []
+
+
+def test_only_web_urls_are_fetched(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(books_mod, "fetch", lambda url, timeout: calls.append(url) or b"\xff\xd8\xffjpg")
+    assert download_covers([{"key": "x:1", "url": "file:///etc/hosts"}], tmp_path) == {"x:1": None}
+    assert calls == []
+
+
+def test_douban_search_turns_any_failure_into_search_error(tmp_path, monkeypatch):
+    import http.client
+
+    def broken(url, timeout):
+        raise http.client.IncompleteRead(b"")
+    monkeypatch.setattr(books_mod, "fetch", broken)
+    with pytest.raises(SearchError):
+        douban_search("人月神话", tmp_path)
